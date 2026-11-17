@@ -5,6 +5,7 @@ use tonic::codegen::http::Uri;
 pub enum ClassroomLink {
     Course { course: i64, classwork: bool },
     Topic { course: i64, topic: i64 },
+    YourWork { course: i64, student: i64 },
     Item { course: i64, item: i64, kind: ItemLinkKind },
 }
 
@@ -43,6 +44,8 @@ impl ClassroomLink {
             ["w", course, "tc", topic] => Some(Self::Topic {
                 course: link_id(course)?, topic: link_id(topic)?,
             }),
+            ["c", course, "sp", student, "all", "default"] =>
+                Some(Self::YourWork { course: link_id(course)?, student: link_id(student)? }),
             ["c", course, kind, item, "details" | "dw"] => Some(Self::Item {
                 course: link_id(course)?,
                 item: link_id(item)?,
@@ -61,7 +64,8 @@ impl ClassroomLink {
 
     pub fn course(self) -> i64 {
         match self {
-            Self::Course { course, .. } | Self::Topic { course, .. } | Self::Item { course, .. } => course,
+            Self::Course { course, .. } | Self::Topic { course, .. } | Self::YourWork { course, .. }
+                | Self::Item { course, .. } => course,
         }
     }
 
@@ -73,6 +77,10 @@ impl ClassroomLink {
             Self::Topic { topic, .. } => {
                 let topic = encoded_id(topic)?;
                 format!("https://classroom.google.com/w/{course}/tc/{topic}")
+            }
+            Self::YourWork { student, .. } => {
+                let student = encoded_id(student)?;
+                format!("https://classroom.google.com/c/{course}/sp/{student}/all/default")
             }
             Self::Item { item, kind, .. } => {
                 let item = encoded_id(item)?;
@@ -155,5 +163,14 @@ mod tests {
         ] {
             assert!(ClassroomLink::parse(value).is_none(), "{value}");
         }
+    }
+
+    #[test]
+    fn parses_only_the_observed_student_work_route() {
+        let target = ClassroomLink::YourWork { course: 123, student: 456 };
+        assert_eq!(ClassroomLink::parse(&target.web_url().unwrap()), Some(target));
+        assert_eq!(ClassroomLink::parse("https://classroom.google.com/u/1/c/MTIz/sp/NDU2/all/default"), Some(target));
+        assert!(ClassroomLink::parse("https://classroom.google.com/c/MTIz/sp/NDU2/all/grades").is_none());
+        assert!(ClassroomLink::parse("https://classroom.google.com/c/MTIz/sp/0/all/default").is_none());
     }
 }

@@ -18,6 +18,22 @@ async fn main() {
         println!("Addressable class members returned={}", members.len());
         return;
     }
+    if std::env::args().nth(1).as_deref() == Some("--your-work-link") {
+        use classroom_rust::classroom_links::ClassroomLink;
+        let supplied = std::env::args().nth(2).map(|url|
+            ClassroomLink::parse(&url).expect("Read a valid Classroom Your work URL"));
+        let course = supplied.map(ClassroomLink::course).or_else(|| session.snapshot.courses.iter()
+            .find(|course| course.shows_on_home()).map(|course| course.id)).expect("Read an enrolled class");
+        assert!(session.snapshot.courses.iter().any(|entry| entry.id == course), "Read an enrolled class");
+        let own = auth::own_work_link(&session, course).await.expect("Read the signed-in Classroom identity");
+        assert_eq!(ClassroomLink::parse(&own.web_url().unwrap()), Some(own));
+        if let Some(supplied) = supplied {
+            assert_eq!(supplied, own, "The supplied route must match the signed-in account");
+        }
+        let submissions = auth::load_submissions(&session, course).await.expect("Read only the signed-in user’s work");
+        println!("Your work route matched the signed-in account; submissions={}", submissions.len());
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--class-creation-permission") {
         let allowed = auth::can_create_classes(&session).await.expect("Read account class creation permission");
         println!("Account can create classes={allowed}");

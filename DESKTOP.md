@@ -12,7 +12,7 @@ Home also reads your personal class visibility. Hidden classes stay enrolled and
 
 In **Classroom order**, drag a class by the grip on its card. You can also open the card’s **Move** menu and choose the beginning, the end, or a position after another visible class. Home and the sidebar update after Classroom confirms the order.
 
-Use **Open link…** to paste a Classroom class, classwork, assignment or question URL. The app resolves it against the current account or offline copy. The class and item views have copy buttons for the supported Classroom URLs.
+Use **Open link…** to paste a Classroom class, topic, material, announcement, assignment or question URL. The app resolves it against the current account or offline copy. **Your work** links also open directly when a live account check confirms that the link belongs to the signed-in student. The class and item views have copy buttons for supported URLs.
 
 Due soon, Stream, Classwork, People, Your work, To-do, Calendar, invitations and assignment details load automatically on navigation. Loaded content stays visible while another section finishes. A failed read shows Retry in the affected section. Leaving and reopening the page also retries it. If a comment send ends without a confirmed result, the open thread reloads automatically and the draft stays available.
 
