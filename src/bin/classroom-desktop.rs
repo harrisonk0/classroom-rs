@@ -162,9 +162,9 @@ impl TodoFilter {
     fn groups(self) -> &'static [TodoGroup] {
         use TodoGroup::*;
         match self {
-            Self::Assigned => &[NoDueDate, ThisWeek, NextWeek, Later, LastWeek, Earlier, StatusUnavailable],
-            Self::Missing => &[ThisWeek, LastWeek, Earlier, NoDueDate, NextWeek, Later],
-            Self::Done => &[NoDueDate, DoneEarly, ThisWeek, LastWeek, Earlier, NextWeek, Later],
+            Self::Assigned => &[NoDueDate, ThisWeek, NextWeek, Later],
+            Self::Missing => &[ThisWeek, LastWeek, Earlier],
+            Self::Done => &[NoDueDate, DoneEarly, ThisWeek, LastWeek, Earlier],
         }
     }
 }
@@ -5382,6 +5382,17 @@ impl App {
             if self.screen == Screen::Home && std::env::var_os("CLASSROOM_READ_ONLY_DIAGNOSTICS").is_some() {
                 println!("Home overview ready; classes={} due_soon={}",
                     self.assignments_completed.len(), snapshot.upcoming_work(&Local::now(), None, 5).len());
+                let today = Local::now().date_naive();
+                for filter in TodoFilter::ALL {
+                    let groups = self.todo_items(today, filter);
+                    let counts = groups.iter().map(|(group, items)| (group.label(), items.len())).collect::<Vec<_>>();
+                    println!("To-do {} {counts:?}", filter.label());
+                }
+                if let Some(previous) = monday_of(today).checked_sub_days(Days::new(7)) {
+                    let counts = self.calendar_items(previous).iter()
+                        .map(|(date, items)| (date.to_string(), items.len())).collect::<Vec<_>>();
+                    println!("Calendar previous week {counts:?}");
+                }
                 let _ = io::stdout().flush();
             }
         }
@@ -9432,7 +9443,7 @@ impl App {
             .into()
     }
 
-    fn calendar_items(&self) -> BTreeMap<NaiveDate, Vec<(&Coursework, &Course)>> {
+    fn calendar_items(&self, monday: NaiveDate) -> BTreeMap<NaiveDate, Vec<(&Coursework, &Course)>> {
         let mut by_day: BTreeMap<_, Vec<_>> = BTreeMap::new();
         if let Some(data) = &self.snapshot {
             for course in data.courses.iter().filter(|course| {
@@ -9440,7 +9451,7 @@ impl App {
             }) {
                 for item in data.coursework_for(course.id).unwrap_or_default() {
                     if let Some(date) = item.due_date(&Local)
-                        && monday_of(date) == self.calendar_monday
+                        && monday_of(date) == monday
                     {
                         by_day.entry(date).or_default().push((item, course));
                     }
@@ -9476,7 +9487,7 @@ impl App {
         }
         let toolbar = toolbar.wrap().vertical_spacing(9);
 
-        let items = self.calendar_items();
+        let items = self.calendar_items(monday);
         let mut body = column![text("Calendar").size(27).color(FG), toolbar].spacing(14);
         let status = self.page_read_status(PageRead::Assignments, self.assignments_loaded, "Loading due dates…");
         if let Some(status) = status {
@@ -9490,11 +9501,12 @@ impl App {
                 return Self::calendar_grid(monday, today, &items);
             }
             let mut agenda = column![].spacing(12);
-            for (date, entries) in &items {
+            for offset in 0..7 {
+                let date = monday + Days::new(offset);
                 let mut day = column![
-                    text(date.format("%A, %-d %B").to_string()).size(15).font(medium()).color(FG)
+                    text(calendar_agenda_heading(date, today)).size(15).font(medium()).color(FG)
                 ].spacing(7);
-                for (item, course) in entries {
+                for (item, course) in items.get(&date).into_iter().flatten() {
                     day = day.push(coursework_row(item, Some(&course.title)));
                 }
                 agenda = agenda.push(day);
@@ -9561,7 +9573,7 @@ impl App {
         days.into()
     }
 
-    fn todo_items(&self, today: NaiveDate) -> BTreeMap<TodoGroup, Vec<(&Coursework, &Course)>> {
+    fn todo_items(&self, today: NaiveDate, filter: TodoFilter) -> BTreeMap<TodoGroup, Vec<(&Coursework, &Course)>> {
         let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
         if let Some(data) = &self.snapshot {
             for course in data.courses.iter().filter(|course| {
@@ -9570,11 +9582,11 @@ impl App {
                 for item in data.coursework_for(course.id).unwrap_or_default().iter().filter(|item| has_submission(item)) {
                     let status = item.submission.as_ref().map(|submission| submission.status);
                     let group = match TodoFilter::from_status(status) {
-                        Some(filter) if filter == self.todo_filter => {
+                        Some(status_filter) if status_filter == filter => {
                             let completed = filter == TodoFilter::Done && status != Some(SubmissionStatus::Excused);
                             TodoGroup::for_deadline(item.due_date(&Local), today, completed)
                         }
-                        None if self.todo_filter == TodoFilter::Assigned => TodoGroup::StatusUnavailable,
+                        None if filter == TodoFilter::Assigned => TodoGroup::StatusUnavailable,
                         _ => continue,
                     };
                     groups.entry(group).or_default().push((item, course));
@@ -9583,7 +9595,7 @@ impl App {
         }
         for items in groups.values_mut() {
             items.sort_by_key(|(item, _)| item.due_at_millis);
-            if self.todo_filter != TodoFilter::Assigned {
+            if filter != TodoFilter::Assigned {
                 items.reverse();
             }
         }
@@ -9604,22 +9616,21 @@ impl App {
         if let Some(status) = status {
             body = body.push(status);
         }
-        let groups = self.todo_items(Local::now().date_naive());
-        if groups.is_empty() && !pending {
-            body = body.push(empty_panel(
-                Icon::Check, "No matching work", "There are no assignments or questions in this view.",
-            ));
-        }
-        for group in self.todo_filter.groups() {
-            let Some(entries) = groups.get(group) else { continue };
-            let closed = self.collapsed_todo_groups.contains(&(self.todo_filter, *group));
+        let groups = self.todo_items(Local::now().date_naive(), self.todo_filter);
+        let standard = self.todo_filter.groups();
+        let sections = standard.iter().copied().chain(groups.keys().copied().filter(|group| !standard.contains(group)));
+        for group in sections {
+            let entries = groups.get(&group).map(Vec::as_slice).unwrap_or_default();
+            if pending && entries.is_empty() { continue; }
+            let closed = self.collapsed_todo_groups.contains(&(self.todo_filter, group));
             let heading = button(row![
                 text(group.label()).size(16).font(medium()).color(FG),
                 space().width(Fill),
                 text(entries.len().to_string()).size(14).color(MUTED),
-                text(if closed { "⌄" } else { "⌃" }).size(16).color(MUTED),
+                text(if entries.is_empty() || closed { "⌄" } else { "⌃" }).size(16).color(MUTED),
             ].spacing(12).align_y(Alignment::Center))
-                .style(outline_style).width(Fill).padding([10, 13]).on_press(Message::ToggleTodoGroup(*group));
+                .style(outline_style).width(Fill).padding([10, 13])
+                .on_press_maybe((!entries.is_empty()).then_some(Message::ToggleTodoGroup(group)));
             body = body.push(heading);
             if !closed {
                 for (item, course) in entries {
@@ -9637,6 +9648,15 @@ impl App {
             text(title).size(27).color(FG),
             empty_panel(glyph, "No live data available", body),
         ].spacing(22).padding(26).width(Fill)).width(Fill).height(Fill).into()
+    }
+}
+
+fn calendar_agenda_heading(date: NaiveDate, today: NaiveDate) -> String {
+    match (date - today).num_days() {
+        -1 => "Yesterday".into(),
+        0 => "Today".into(),
+        1 => "Tomorrow".into(),
+        _ => date.format("%-d %b").to_string(),
     }
 }
 
@@ -10658,17 +10678,17 @@ mod tests {
         snapshot.coursework.get_mut(&6).unwrap().push(archived_item);
         app.install_snapshot(snapshot);
 
-        assert_eq!(app.calendar_items().values().flatten().count(), 4);
+        assert_eq!(app.calendar_items(app.calendar_monday).values().flatten().count(), 4);
         assert!(app.active_course_options().iter().all(|class| class.id != Some(6)));
         let class = app.active_course_options().into_iter().find(|class| class.id == Some(1)).unwrap();
         let _ = app.update(Message::CalendarFilter(class));
-        let events: Vec<_> = app.calendar_items().into_values().flatten().collect();
+        let events: Vec<_> = app.calendar_items(app.calendar_monday).into_values().flatten().collect();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0.title, "Poetry comparison");
 
         let _ = app.update(Message::CalendarShift(1));
         assert_eq!(app.calendar_monday, original_week + Days::new(7));
-        assert!(app.calendar_items().is_empty());
+        assert!(app.calendar_items(app.calendar_monday).is_empty());
         let _ = app.update(Message::CalendarShift(-1));
         assert_eq!(app.calendar_monday, original_week);
         let _ = app.update(Message::CalendarShift(-1));
@@ -10676,7 +10696,7 @@ mod tests {
         assert_eq!(app.calendar_monday, original_week);
 
         let _ = app.update(Message::Navigate(Screen::Calendar));
-        let (id, item) = app.calendar_items().into_values().flatten().next()
+        let (id, item) = app.calendar_items(app.calendar_monday).into_values().flatten().next()
             .map(|(item, course)| (course.id, item.id.clone())).unwrap();
         let _ = app.update(Message::OpenItem(id, item));
         assert_eq!(app.screen, Screen::Item(1));
@@ -10900,6 +10920,19 @@ mod tests {
     }
 
     #[test]
+    fn todo_keeps_standard_groups_and_calendar_uses_relative_day_labels() {
+        use TodoGroup::*;
+        assert_eq!(TodoFilter::Assigned.groups(), [NoDueDate, ThisWeek, NextWeek, Later]);
+        assert_eq!(TodoFilter::Missing.groups(), [ThisWeek, LastWeek, Earlier]);
+        assert_eq!(TodoFilter::Done.groups(), [NoDueDate, DoneEarly, ThisWeek, LastWeek, Earlier]);
+        let today = NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
+        assert_eq!(calendar_agenda_heading(today - Days::new(1), today), "Yesterday");
+        assert_eq!(calendar_agenda_heading(today, today), "Today");
+        assert_eq!(calendar_agenda_heading(today + Days::new(1), today), "Tomorrow");
+        assert_eq!(calendar_agenda_heading(today + Days::new(2), today), "4 Jan");
+    }
+
+    #[test]
     fn todo_routes_unknown_work_class_filters_and_group_collapsing() {
         let (mut app, mut snapshot) = fixture();
         let today = Local::now().date_naive();
@@ -10908,16 +10941,16 @@ mod tests {
         snapshot.coursework.get_mut(&6).unwrap().push(archived_item);
         app.install_snapshot(snapshot);
 
-        let groups = app.todo_items(today);
+        let groups = app.todo_items(today, app.todo_filter);
         assert_eq!(groups[&TodoGroup::ThisWeek][0].0.id, "demo-poetry");
         assert!(groups[&TodoGroup::StatusUnavailable].iter().any(|(item, _)| item.id == "demo-sort"));
         assert!(groups.values().flatten().all(|(_, course)| course.id != 6));
 
         let filter = app.active_course_options().into_iter().find(|class| class.id == Some(5)).unwrap();
         let _ = app.update(Message::FilterTodoClass(filter));
-        assert!(app.todo_items(today).is_empty());
+        assert!(app.todo_items(today, app.todo_filter).is_empty());
         let _ = app.update(Message::SetTodoFilter(TodoFilter::Missing));
-        let groups = app.todo_items(today);
+        let groups = app.todo_items(today, app.todo_filter);
         assert_eq!(groups[&TodoGroup::ThisWeek][0].0.id, "demo-waves");
         let _ = app.update(Message::ToggleTodoGroup(TodoGroup::ThisWeek));
         assert!(app.collapsed_todo_groups.contains(&(TodoFilter::Missing, TodoGroup::ThisWeek)));
@@ -10928,7 +10961,7 @@ mod tests {
         let all_classes = app.active_course_options().remove(0);
         let _ = app.update(Message::FilterTodoClass(all_classes));
         let _ = app.update(Message::SetTodoFilter(TodoFilter::Done));
-        assert_eq!(app.todo_items(today).values().flatten().count(), 1);
+        assert_eq!(app.todo_items(today, app.todo_filter).values().flatten().count(), 1);
     }
 
     #[test]
