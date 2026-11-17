@@ -5633,6 +5633,9 @@ impl App {
         let needs_reload = match target {
             ClassroomLink::Item { item, .. } => snapshot.coursework_for(course)
                 .is_some_and(|items| !items.iter().any(|entry| entry.id.parse::<i64>().ok() == Some(item))),
+            ClassroomLink::Topic { topic, .. } => snapshot.coursework_for(course)
+                .is_some_and(|items| !items.iter().any(|entry| entry.topic_id.as_deref() == Some(&topic.to_string())))
+                && snapshot.topics_for(course).is_none_or(|topics| !topics.iter().any(|entry| entry.id == topic.to_string())),
             _ => false,
         };
         self.classroom_link_input = None;
@@ -5643,8 +5646,19 @@ impl App {
                 let navigate = self.update(Message::Navigate(Screen::Course(course)));
                 Task::batch([navigate, self.update(Message::SetTab(if classwork { Tab::Classwork } else { Tab::Stream }))])
             }
-            ClassroomLink::Item { item, .. } => {
-                self.tab = Tab::Classwork;
+            ClassroomLink::Topic { topic, .. } => {
+                let navigate = self.update(Message::Navigate(Screen::Course(course)));
+                let tab = self.update(Message::SetTab(Tab::Classwork));
+                let topic = self.update(Message::SelectTopic(Some(topic.to_string())));
+                let refresh = if needs_reload && self.can_read_pages() {
+                    self.update(Message::LoadCoursework(course))
+                } else {
+                    Task::none()
+                };
+                Task::batch([navigate, tab, topic, refresh])
+            }
+            ClassroomLink::Item { item, kind, .. } => {
+                self.tab = if kind == ItemLinkKind::Announcement { Tab::Stream } else { Tab::Classwork };
                 let open = self.update(Message::OpenItem(course, item.to_string()));
                 self.previous_screen = Some(Screen::Course(course));
                 let refresh = if needs_reload && self.can_read_pages() {
@@ -9362,6 +9376,8 @@ fn item_link_kind(item: &Coursework) -> Option<ItemLinkKind> {
         (CourseworkKind::Assignment, _) => Some(ItemLinkKind::Assignment),
         (CourseworkKind::Question, Some(QuestionDetails::ShortAnswer)) => Some(ItemLinkKind::ShortAnswer),
         (CourseworkKind::Question, Some(QuestionDetails::MultipleChoice(_))) => Some(ItemLinkKind::MultipleChoice),
+        (CourseworkKind::Material, _) => Some(ItemLinkKind::Material),
+        (CourseworkKind::Announcement, _) => Some(ItemLinkKind::Announcement),
         _ => None,
     }
 }
@@ -10755,6 +10771,47 @@ mod tests {
         let _ = app.update(Message::OpenClassroomLink);
         assert_eq!(app.screen, Screen::Course(1));
         assert!(app.error.is_some());
+    }
+
+    #[test]
+    fn topic_link_opens_classwork_and_keeps_selection_when_items_load() {
+        let (mut app, mut snapshot) = fixture();
+        app.verify_live_course_count = false;
+        let mut items = snapshot.coursework.remove(&1).unwrap();
+        items.iter_mut().find(|item| item.kind == CourseworkKind::Assignment).unwrap()
+            .topic_id = Some("456".into());
+        app.install_snapshot(snapshot);
+        app.screen = Screen::Course(2);
+        app.classroom_link_input = Some("https://classroom.google.com/u/0/w/MQ/tc/NDU2".into());
+        let _ = app.update(Message::OpenClassroomLink);
+        assert_eq!((app.screen, app.tab), (Screen::Course(1), Tab::Classwork));
+        assert_eq!(app.selected_topic.as_deref(), Some("456"));
+        let _ = app.update(Message::CourseworkLoaded(1, Ok(CourseContents { items, topics: None })));
+        assert_eq!(app.selected_topic.as_deref(), Some("456"));
+        assert_eq!(app.snapshot.as_ref().unwrap().classwork_sections(1, Some("456")).len(), 1);
+    }
+
+    #[test]
+    fn material_and_announcement_links_open_matching_items() {
+        let (mut app, mut snapshot) = fixture();
+        app.verify_live_course_count = false;
+        let mut item = snapshot.coursework_for(1).unwrap()[0].clone();
+        item.id = "42".into();
+        item.kind = CourseworkKind::Material;
+        snapshot.coursework.insert(1, vec![item.clone()]);
+        app.install_snapshot(snapshot);
+        app.classroom_link_input = Some("https://classroom.google.com/c/MQ/m/NDI/details".into());
+        let _ = app.update(Message::OpenClassroomLink);
+        assert_eq!((app.screen, app.tab), (Screen::Item(1), Tab::Classwork));
+        assert_eq!(item_link_kind(&item), Some(ItemLinkKind::Material));
+        let _ = app.update(Message::CloseItem);
+
+        item.kind = CourseworkKind::Announcement;
+        app.snapshot.as_mut().unwrap().coursework.insert(1, vec![item.clone()]);
+        app.classroom_link_input = Some("https://classroom.google.com/c/MQ/p/NDI/details".into());
+        let _ = app.update(Message::OpenClassroomLink);
+        assert_eq!((app.screen, app.tab), (Screen::Item(1), Tab::Stream));
+        assert_eq!(item_link_kind(&item), Some(ItemLinkKind::Announcement));
     }
 
     #[test]
