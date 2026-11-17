@@ -1572,6 +1572,8 @@ struct App {
     pending_remove_material: Option<(i64, i64, i64)>,
     personal_copy_checks: BTreeMap<(i64, i64), (String, bool)>,
     pending_personal_copy: Option<(i64, i64, String)>,
+    personal_copy_generation: u64,
+    personal_copy_loading_generation: Option<u64>,
     submissions_checked: BTreeSet<i64>,
     selected_topic: Option<String>,
     classwork_toggles: BTreeSet<String>,
@@ -1718,6 +1720,8 @@ impl App {
             pending_remove_material: None,
             personal_copy_checks: BTreeMap::new(),
             pending_personal_copy: None,
+            personal_copy_generation: 0,
+            personal_copy_loading_generation: None,
             submissions_checked: BTreeSet::new(),
             selected_topic: None,
             classwork_toggles: BTreeSet::new(),
@@ -2598,6 +2602,8 @@ impl App {
                 self.busy = false;
                 match result {
                     Ok(()) => {
+                        self.reset_personal_copy();
+                        self.submissions_checked.clear();
                         self.page_errors.clear();
                         self.reset_notifications();
                         self.reset_stream_access();
@@ -3094,6 +3100,11 @@ impl App {
                 }
                 match result {
                     Ok(contents) => {
+                        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+                        self.personal_copy_checks.retain(|(course, _), _| *course != id);
+                        if self.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
+                            self.pending_personal_copy = None;
+                        }
                         self.gradebooks.remove(&id);
                         if let Some(snapshot) = &mut self.snapshot {
                             if self.screen == Screen::Course(id)
@@ -3134,6 +3145,9 @@ impl App {
                         DetailRead::PersonalCopy(course, item) => self.personal_copy_candidate(course, item),
                         _ => None,
                     };
+                    if matches!(request, DetailRead::PersonalCopy(..)) {
+                        self.personal_copy_loading_generation = Some(self.personal_copy_generation);
+                    }
                     self.loading_detail = Some(request);
                     self.page_errors.remove(&PageRead::Detail(request));
                     return Task::perform(async move {
@@ -3175,6 +3189,12 @@ impl App {
             }
             Message::DetailLoaded(request, result) => {
                 self.loading_detail = None;
+                if matches!(request, DetailRead::PersonalCopy(..))
+                    && self.personal_copy_loading_generation.take() != Some(self.personal_copy_generation)
+                {
+                    self.queued_page_load = true;
+                    return self.dequeue_page_load().map_or_else(Task::none, |read| self.update(read));
+                }
                 if std::env::var_os("CLASSROOM_READ_ONLY_DIAGNOSTICS").is_some() {
                     let section = match request {
                         DetailRead::Roster(_) => "People",
@@ -3209,6 +3229,10 @@ impl App {
                         self.queued_page_load |= self.screen == Screen::Course(course) && self.tab == Tab::People;
                     }
                     (DetailRead::Submissions(course), Ok(DetailData::Submissions(submissions))) => {
+                        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+                        if self.pending_personal_copy.as_ref().is_some_and(|(id, _, _)| *id == course) {
+                            self.pending_personal_copy = None;
+                        }
                         self.personal_copy_checks.retain(|(id, _), _| *id != course);
                         if let Some(snapshot) = &mut self.snapshot {
                             snapshot.set_submissions(course, submissions);
@@ -5095,6 +5119,7 @@ impl App {
                 self.reset_artwork();
                 self.session = None;
                 self.snapshot = None;
+                self.reset_personal_copy();
                 self.classroom_link_input = None;
                 self.show_hidden_classes = false;
                 self.open_course_menu = None;
@@ -5170,6 +5195,11 @@ impl App {
         }
 
         if let Some(mut contents) = result.contents {
+            self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+            self.personal_copy_checks.retain(|(course, _), _| *course != id);
+            if self.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
+                self.pending_personal_copy = None;
+            }
             if let Some(previous) = snapshot.coursework_for(id) {
                 for item in &mut contents.items {
                     if let Some(old) = previous.iter().find(|old| old.id == item.id) {
@@ -5612,7 +5642,14 @@ impl App {
         self.notice = result.is_ok().then(|| success.to_owned());
     }
 
+    fn reset_personal_copy(&mut self) {
+        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+        self.personal_copy_checks.clear();
+        self.pending_personal_copy = None;
+    }
+
     fn install_snapshot(&mut self, snapshot: Snapshot) {
+        self.reset_personal_copy();
         self.teachers_generation = self.teachers_generation.wrapping_add(1);
         self.class_teachers.clear();
         self.reset_notifications();
@@ -10093,6 +10130,26 @@ mod tests {
         }
         app.teacher_topics.insert(1, Vec::new());
         assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::TeacherDrafts(1))));
+    }
+
+    #[test]
+    fn personal_copy_checks_reset_with_snapshot_and_discard_stale_reads() {
+        let (mut app, snapshot) = fixture();
+        app.install_snapshot(snapshot.clone());
+        app.personal_copy_checks.insert((1, 42), ("template".into(), true));
+        app.pending_personal_copy = Some((1, 42, "template".into()));
+        app.personal_copy_loading_generation = Some(app.personal_copy_generation);
+        app.install_snapshot(snapshot);
+        assert!(app.personal_copy_checks.is_empty());
+        assert!(app.pending_personal_copy.is_none());
+        let _ = app.update(Message::DetailLoaded(DetailRead::PersonalCopy(1, 42),
+            Ok(DetailData::PersonalCopy("template".into(), true))));
+        assert!(app.personal_copy_checks.is_empty());
+        app.personal_copy_checks.insert((1, 42), ("template".into(), true));
+        app.pending_personal_copy = Some((1, 42, "template".into()));
+        let _ = app.update(Message::SessionForgotten(Ok(())));
+        assert!(app.personal_copy_checks.is_empty());
+        assert!(app.pending_personal_copy.is_none());
     }
 
     #[test]
