@@ -472,6 +472,7 @@ enum Message {
     AddAttachmentLink(i64, i64),
     ChooseSubmissionFile(i64, i64),
     SubmissionFileChosen(i64, i64, Result<Option<PathBuf>, String>),
+    SubmissionFileDropped(PathBuf),
     CancelSubmissionFile,
     ConfirmPersonalCopy(i64, i64, String),
     CancelPersonalCopy,
@@ -784,6 +785,7 @@ impl fmt::Debug for Message {
             Self::AddAttachmentLink(..) => "AddAttachmentLink",
             Self::ChooseSubmissionFile(..) => "ChooseSubmissionFile",
             Self::SubmissionFileChosen(..) => "SubmissionFileChosen",
+            Self::SubmissionFileDropped(_) => "SubmissionFileDropped",
             Self::CancelSubmissionFile => "CancelSubmissionFile",
             Self::ConfirmPersonalCopy(..) => "ConfirmPersonalCopy",
             Self::CancelPersonalCopy => "CancelPersonalCopy",
@@ -1888,7 +1890,11 @@ impl App {
         } else {
             Subscription::none()
         };
-        let subscriptions = Subscription::batch([drag, edit_keys]);
+        let file_drop = iced::event::listen_with(|event, _, _| match event {
+            Event::Window(window::Event::FileDropped(path)) => Some(Message::SubmissionFileDropped(path)),
+            _ => None,
+        });
+        let subscriptions = Subscription::batch([drag, edit_keys, file_drop]);
         #[cfg(target_os = "macos")]
         if matches!(self.submission_capture, Some(CaptureState::RecordingCamera { .. })) {
             let frames = iced::time::every(Duration::from_millis(100))
@@ -3850,7 +3856,7 @@ impl App {
                 }
             }
             Message::ChooseSubmissionFile(course, item)
-                if self.can_compose_comment(course, item) && !self.has_pending_request() =>
+                if self.can_add_submission_drive_file(course, item) && !self.has_pending_request() =>
             {
                 self.choosing_submission_file = true;
                 return Task::perform(choose_attachment_file(),
@@ -3858,23 +3864,43 @@ impl App {
             }
             Message::SubmissionFileChosen(course, item, result) => {
                 self.choosing_submission_file = false;
-                if self.can_compose_comment(course, item) {
+                if self.can_add_submission_drive_file(course, item) {
                     match result {
-                        Ok(Some(path)) => self.submission_file = Some((course, item, path)),
+                        Ok(Some(path)) => self.stage_submission_file(course, item, path),
                         Ok(None) => {},
                         Err(error) => self.error = Some(error),
                     }
                 }
             }
+            Message::SubmissionFileDropped(path) => {
+                if let Screen::Item(course) = self.screen
+                    && let Some(item) = self.item_id.as_deref().and_then(|id| id.parse::<i64>().ok())
+                    && self.can_add_submission_drive_file(course, item)
+                    && !self.has_pending_request()
+                    && self.submission_file.is_none()
+                    && self.drive_picker.is_none()
+                    && self.pending_submission.is_none()
+                    && self.pending_personal_copy.is_none()
+                    && self.pending_remove_material.is_none()
+                {
+                    self.stage_submission_file(course, item, path);
+                }
+            }
             Message::CancelSubmissionFile => self.submission_file = None,
             Message::UploadSubmissionFile(course, item)
-                if self.can_compose_comment(course, item) && !self.has_pending_request() =>
+                if self.can_add_submission_drive_file(course, item) && !self.has_pending_request() =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
                 let Some((selected_course, selected_item, path)) = self.submission_file.take() else {
                     return Task::none();
                 };
                 if (selected_course, selected_item) != (course, item) {
+                    self.submission_file = Some((selected_course, selected_item, path));
+                    return Task::none();
+                }
+                if let Err(error) = validate_submission_file(&path) {
+                    self.submission_file = Some((course, item, path));
+                    self.error = Some(error);
                     return Task::none();
                 }
                 self.sending_submission = true;
@@ -7084,6 +7110,16 @@ impl App {
                         == Some(desktop_auth::SubmissionAction::TurnIn))
     }
 
+    fn stage_submission_file(&mut self, course: i64, item: i64, path: PathBuf) {
+        match validate_submission_file(&path) {
+            Ok(()) => {
+                self.submission_file = Some((course, item, path));
+                self.error = None;
+            }
+            Err(error) => self.error = Some(error),
+        }
+    }
+
     fn discard_submission_capture(&mut self) {
         #[cfg(target_os = "macos")]
         {
@@ -9104,10 +9140,13 @@ impl App {
                                     .then_some(Message::UploadSubmissionFile(course_id, item_id))),
                         ].spacing(8).align_y(Alignment::Center));
                     } else {
-                        work = work.push(button(if self.sending_submission { "Updating your work…" } else { "Choose file…" })
-                            .padding([8, 12]).style(outline_style)
-                            .on_press_maybe((!self.has_pending_request())
-                                .then_some(Message::ChooseSubmissionFile(course_id, item_id))));
+                        work = work.push(row![
+                            button(if self.sending_submission { "Updating your work…" } else { "Choose file…" })
+                                .padding([8, 12]).style(outline_style)
+                                .on_press_maybe((!self.has_pending_request())
+                                    .then_some(Message::ChooseSubmissionFile(course_id, item_id))),
+                            text("or drop a file into this window").size(13).color(MUTED),
+                        ].spacing(8).align_y(Alignment::Center));
                     }
                 }
                 let confirmation = (course_id, item_id, action);
@@ -10178,6 +10217,18 @@ fn matching_personal_copy<'a>(item: &'a Coursework, template: &desktop_data::Att
     (copy.kind == desktop_data::AttachmentKind::DriveFile).then_some(copy)
 }
 
+fn validate_submission_file(path: &Path) -> Result<(), String> {
+    let value = path.to_str().ok_or("This file path is not valid UTF-8.")?;
+    if value.len() > 8192 || value.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err("This file path cannot be uploaded. Choose another file.".into());
+    }
+    let metadata = fs::metadata(path).map_err(|_| "Couldn't read this file. Choose another file.")?;
+    if !metadata.is_file() || metadata.len() == 0 {
+        return Err("Choose a nonempty regular file.".into());
+    }
+    Ok(())
+}
+
 fn append_comment_mention(draft: &mut String, email: &str) {
     let prefix = if draft.is_empty() || draft.ends_with(char::is_whitespace) { "" } else { " " };
     if draft.len() + prefix.len() + email.len() + 2 <= 10_000 {
@@ -10571,6 +10622,29 @@ mod tests {
         let mut snapshot = Snapshot::demo();
         snapshot.source = SnapshotSource::Live;
         (app, snapshot)
+    }
+
+    #[test]
+    fn dropped_files_stage_only_nonempty_regular_files_and_preserve_existing_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let good = directory.path().join("notes.txt");
+        let empty = directory.path().join("empty.txt");
+        fs::write(&good, "text").unwrap();
+        fs::write(&empty, "").unwrap();
+        let (mut app, _) = fixture();
+        app.stage_submission_file(1, 42, good.clone());
+        assert_eq!(app.submission_file, Some((1, 42, good.clone())));
+        for bad in [empty, directory.path().to_owned(), directory.path().join("missing")] {
+            app.stage_submission_file(1, 42, bad);
+            assert_eq!(app.submission_file, Some((1, 42, good.clone())));
+            assert!(app.error.is_some());
+        }
+        let long = PathBuf::from("a".repeat(8193));
+        assert!(validate_submission_file(&long).is_err());
+
+        let _ = app.update(Message::SubmissionFileDropped(good.clone()));
+        assert_eq!(app.submission_file, Some((1, 42, good)));
+        assert!(!app.sending_submission);
     }
 
     #[test]
