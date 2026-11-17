@@ -47,6 +47,18 @@ class Session:
 
 
 class DriveDownloadTests(unittest.TestCase):
+    def test_workspace_preview_exports_pdf(self):
+        meta = Response({"id": "file-1", "name": "Sample notes", "mimeType": "application/vnd.google-apps.document",
+                         "capabilities": {"canDownload": True}})
+        session = Session([meta, Response(chunks=[b"%PDF-1.4"], length=8)])
+        with tempfile.TemporaryDirectory() as folder, patch.object(helper.requests, "Session", return_value=session):
+            path = Path(folder) / "temporary"
+            self.assertEqual(helper.download_file("fixture", "file-1", path, preview=True),
+                             {"saved": True, "name": "Sample notes.pdf"})
+            self.assertEqual(path.read_bytes(), b"%PDF-1.4")
+            self.assertTrue(session.calls[1][0].endswith("/file-1/export"))
+            self.assertEqual(session.calls[1][1]["params"], {"mimeType": "application/pdf"})
+
     def test_download_streams_to_caller_owned_temporary_file(self):
         meta = Response({"id": "file-1", "mimeType": "application/pdf", "capabilities": {"canDownload": True}})
         session = Session([meta, Response(chunks=[b"abc", b"def"], length=6)])

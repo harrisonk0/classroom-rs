@@ -130,6 +130,7 @@ pub async fn lookup_drive_file_link(session: &LiveSession, file_id: &str) -> Res
 #[derive(Deserialize)]
 struct SavedFile {
     saved: bool,
+    name: Option<String>,
 }
 
 fn resource_key_for_file(url: Option<&str>, file_id: &str) -> Result<Option<String>, String> {
@@ -151,19 +152,53 @@ fn resource_key_for_file(url: Option<&str>, file_id: &str) -> Result<Option<Stri
 pub async fn save_drive_file(
     session: &LiveSession, file_id: &str, url: Option<&str>, destination: &Path,
 ) -> Result<(), String> {
+    let directory = destination.parent().filter(|path| !path.as_os_str().is_empty())
+        .ok_or("Choose a folder for the downloaded file.")?;
+    download_drive_file(session, file_id, url, directory, false).await?.0
+        .persist(destination).map_err(|_| "Could not save the file in that folder.")?;
+    Ok(())
+}
+
+pub async fn preview_drive_file(
+    session: &LiveSession, file_id: &str, url: Option<&str>, directory: &Path,
+) -> Result<std::path::PathBuf, String> {
+    let (temporary, name) = download_drive_file(session, file_id, url, directory, true).await?;
+    let name = name.ok_or("Drive did not return a preview filename.")?;
+    let path = directory.join(preview_filename(&name));
+    temporary.persist(&path).map_err(|_| "Could not prepare the preview file.")?;
+    Ok(path)
+}
+
+fn preview_filename(name: &str) -> String {
+    let safe: String = name.chars().map(|ch| match ch {
+        '/' | '\\' | ':' => '-',
+        ch if ch.is_control() => ' ',
+        ch => ch,
+    }).collect();
+    let path = Path::new(safe.trim_matches(|ch: char| ch.is_whitespace() || ch == '.'));
+    let mut stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("Attachment").to_owned();
+    while stem.len() > 160 {
+        stem.pop();
+    }
+    let suffix = path.extension().and_then(|extension| extension.to_str()).filter(|extension|
+        extension.len() <= 12 && extension.bytes().all(|ch| ch.is_ascii_alphanumeric()));
+    suffix.map_or_else(|| stem.clone(), |suffix| format!("{stem}.{suffix}"))
+}
+
+async fn download_drive_file(
+    session: &LiveSession, file_id: &str, url: Option<&str>, directory: &Path, preview: bool,
+) -> Result<(tempfile::NamedTempFile, Option<String>), String> {
     if !valid_drive_id(file_id) {
         return Err("Invalid Drive file ID.".into());
     }
     let resource_key = resource_key_for_file(url, file_id)?;
-    let directory = destination.parent().filter(|path| !path.as_os_str().is_empty())
-        .ok_or("Choose a folder for the downloaded file.")?;
     let temporary = tempfile::Builder::new().prefix(".classroom-download-")
         .tempfile_in(directory).map_err(|_| "Could not create a temporary file in that folder.")?;
     let temporary_path = temporary.path().to_str().ok_or("The destination path is not valid UTF-8.")?;
     let bearer = session.bearer_for_request(None).await?;
     let payload = Zeroizing::new(serde_json::to_vec(&serde_json::json!({
         "file_id": file_id, "temporary_path": temporary_path, "resource_key": resource_key,
-        "bearer": bearer.as_str(),
+        "bearer": bearer.as_str(), "preview": preview,
     })).map_err(|_| "Could not prepare the file download.")?);
     let reply: SavedFile = run_drive_helper(&["--download"], payload, Duration::from_secs(600),
         "Drive did not finish downloading the file.").await?;
@@ -171,14 +206,21 @@ pub async fn save_drive_file(
         return Err("Drive did not confirm the file was saved.".into());
     }
     temporary.as_file().sync_all().map_err(|_| "Could not finish saving the file.")?;
-    temporary.persist(destination).map_err(|_| "Could not save the file in that folder.")?;
-    Ok(())
+    Ok((temporary, reply.name))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::desktop_auth::{classwork, material_matches};
+
+    #[test]
+    fn preview_filename_stays_in_one_path_component_and_retains_type() {
+        assert_eq!(preview_filename("../Slides: Week 1.pptx"), "-Slides- Week 1.pptx");
+        let name = preview_filename(&format!("{}.pdf", "📝".repeat(100)));
+        assert!(name.len() <= 164);
+        assert!(name.ends_with(".pdf"));
+    }
 
     #[test]
     fn file_link_must_belong_to_the_requested_untrashed_file() {

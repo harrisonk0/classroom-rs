@@ -533,6 +533,9 @@ enum Message {
     CalendarFilter(ClassFilterOption),
     OpenAttachment(String),
     OpenDriveFile(String),
+    PreviewDriveFile(desktop_data::Attachment),
+    DrivePreviewReady(Result<(Arc<tempfile::TempDir>, PathBuf), String>),
+    DrivePreviewClosed(Result<(), String>),
     SaveDriveFile(desktop_data::Attachment),
     DriveFileSaved(Result<bool, String>),
     DriveFileLinkLoaded(String, Result<String, String>),
@@ -848,6 +851,9 @@ impl fmt::Debug for Message {
             Self::CalendarFilter(_) => "CalendarFilter",
             Self::OpenAttachment(_) => "OpenAttachment",
             Self::OpenDriveFile(_) => "OpenDriveFile",
+            Self::PreviewDriveFile(_) => "PreviewDriveFile",
+            Self::DrivePreviewReady(_) => "DrivePreviewReady",
+            Self::DrivePreviewClosed(_) => "DrivePreviewClosed",
             Self::SaveDriveFile(_) => "SaveDriveFile",
             Self::DriveFileSaved(_) => "DriveFileSaved",
             Self::DriveFileLinkLoaded(..) => "DriveFileLinkLoaded",
@@ -1570,6 +1576,7 @@ struct App {
     class_creation_generation: u64,
     class_creation_allowed: bool,
     opening_drive_file: Option<String>,
+    preparing_drive_preview: bool,
     saving_drive_file: bool,
     new_class: desktop_auth::NewClass,
     invitations: Option<Vec<Course>>,
@@ -1726,6 +1733,7 @@ impl App {
             class_creation_generation: 0,
             class_creation_allowed: false,
             opening_drive_file: None,
+            preparing_drive_preview: false,
             saving_drive_file: false,
             new_class: desktop_auth::NewClass::default(),
             invitations: None,
@@ -1862,7 +1870,7 @@ impl App {
             return true;
         }
         self.busy || self.refreshing || self.changing_membership || self.posting_comment || self.choosing_submission_file
-            || self.saving_drive_file
+            || self.saving_drive_file || self.preparing_drive_preview
             || self.saving_assignment_draft
             || self.saving_teacher_grade
             || self.saving_stream_settings
@@ -4231,6 +4239,47 @@ impl App {
                     (id, result)
                 }, |(id, result)| Message::DriveFileLinkLoaded(id, result));
             }
+            #[cfg(target_os = "macos")]
+            Message::PreviewDriveFile(attachment) if self.can_read_pages() && !self.preparing_drive_preview => {
+                let (Some(session), Some(id)) = (self.session.clone(), attachment.drive_reference) else {
+                    return Task::none();
+                };
+                self.preparing_drive_preview = true;
+                self.error = None;
+                self.notice = Some("Preparing Quick Look preview…".into());
+                return Task::perform(async move {
+                    let directory = Arc::new(tempfile::Builder::new().prefix("classroom-preview-").tempdir()
+                        .map_err(|_| "Could not create a temporary preview folder.")?);
+                    let path = desktop_auth::preview_drive_file(&session, &id, attachment.url.as_deref(), directory.path()).await?;
+                    Ok((directory, path))
+                }, Message::DrivePreviewReady);
+            }
+            #[cfg(target_os = "macos")]
+            Message::DrivePreviewReady(result) => {
+                self.preparing_drive_preview = false;
+                self.notice = None;
+                match result {
+                    Ok((directory, path)) => {
+                        return Task::perform(async move {
+                            let status = tokio::process::Command::new("/usr/bin/qlmanage")
+                                .arg("-p").arg(path)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .kill_on_drop(true)
+                                .status().await;
+                            drop(directory);
+                            if status.is_ok_and(|status| status.success()) {
+                                Ok(())
+                            } else {
+                                Err("Quick Look couldn’t preview this file.".into())
+                            }
+                        }, Message::DrivePreviewClosed);
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
+            Message::DrivePreviewClosed(Err(error)) => self.error = Some(error),
+            Message::DrivePreviewClosed(Ok(())) => {}
             #[cfg(target_os = "macos")]
             Message::SaveDriveFile(attachment) if self.can_read_pages() && !self.has_pending_request() => {
                 let (Some(session), Some(id)) = (self.session.clone(), attachment.drive_reference.clone()) else {
@@ -7000,35 +7049,50 @@ impl App {
 
     fn stream_row<'a>(&'a self, item: &'a Coursework) -> Element<'a, Message> {
         let course = item.course_id;
-        let base = coursework_row(item, None);
-        let Ok(id) = item.id.parse::<i64>() else { return base };
+        if item.kind != CourseworkKind::Announcement {
+            return coursework_row(item, None);
+        }
+        let author = item.author_id.and_then(|id| self.snapshot.as_ref()?.roster_for(course)?
+            .iter().find(|member| member.id.parse::<i64>().ok() == Some(id)))
+            .map_or(item.title.as_str(), |member| member.display_name.as_str());
+        let mut card = column![
+            row![icon(Icon::Feed, ACTIVE_FG, 20), text(author).font(medium()).size(16).color(FG)]
+                .spacing(10).align_y(Alignment::Center),
+        ].spacing(11).width(Fill);
+        if !item.description.trim().is_empty() {
+            card = card.push(formatted_description(&item.description, &item.description_styles, &item.description_bullets));
+        }
+        for attachment in &item.attachments {
+            card = card.push(self.stream_attachment_row(item, attachment));
+        }
+        let mut actions = row![
+            button("Comments").padding([7, 10]).style(quiet_style)
+                .on_press(Message::OpenItem(course, item.id.clone())),
+        ].spacing(6).align_y(Alignment::Center);
         let fixture = self.screenshot_directory.is_some();
-        if item.kind != CourseworkKind::Announcement
-            || (!self.owns_announcement(item) && !self.may_moderate_author(course, item.author_id))
-            || (!fixture && !self.on_live_stream(course))
-        {
-            return base;
-        }
         let ready = fixture || !self.has_pending_request();
-        if self.confirming_stream_delete == Some((course, id)) {
-            let confirmation = column![
-                text("Delete this post?").font(medium()).size(16).color(FG),
-                text("This also deletes its comments. You can’t undo this.").size(14).color(MUTED),
-                row![
-                    button("Cancel").padding([8, 12]).style(quiet_style).on_press(Message::CancelDeleteStreamPost),
-                    button("Delete").padding([8, 12]).style(outline_style)
-                        .on_press_maybe(ready.then_some(Message::DeleteStreamPost(course, id))),
-                ].spacing(8),
-            ].spacing(8);
-            return container(confirmation).width(Fill).padding(14)
-                .style(|_| outline_surface(9.0)).into();
+        if let Ok(id) = item.id.parse::<i64>()
+            && (self.owns_announcement(item) || self.may_moderate_author(course, item.author_id))
+            && (fixture || self.on_live_stream(course))
+        {
+            if self.confirming_stream_delete == Some((course, id)) {
+                let confirmation = column![
+                    text("Delete this post?").font(medium()).size(16).color(FG),
+                    text("This also deletes its comments. You can’t undo this.").size(14).color(MUTED),
+                    row![
+                        button("Cancel").padding([8, 12]).style(quiet_style).on_press(Message::CancelDeleteStreamPost),
+                        button("Delete").padding([8, 12]).style(outline_style)
+                            .on_press_maybe(ready.then_some(Message::DeleteStreamPost(course, id))),
+                    ].spacing(8),
+                ].spacing(8);
+                return container(confirmation).width(Fill).padding(14)
+                    .style(|_| outline_surface(9.0)).into();
+            }
+            let label = if self.deleting_stream_post == Some((course, id)) { "Deleting…" } else { "Delete…" };
+            actions = actions.push(button(label).padding([8, 12]).style(quiet_style)
+                .on_press_maybe(ready.then_some(Message::ConfirmDeleteStreamPost(course, id))));
         }
-        let label = if self.deleting_stream_post == Some((course, id)) { "Deleting…" } else { "Delete…" };
-        row![
-            base,
-            button(label).padding([8, 12]).style(quiet_style)
-                .on_press_maybe(ready.then_some(Message::ConfirmDeleteStreamPost(course, id))),
-        ].spacing(6).align_y(Alignment::Center).into()
+        container(card.push(actions)).width(Fill).padding(16).style(|_| outline_surface(9.0)).into()
     }
 
     fn stream_composer(&self, course: i64) -> Option<Element<'_, Message>> {
@@ -7598,29 +7662,59 @@ impl App {
             details = details.push(formatted_description(&item.description, &item.description_styles, &item.description_bullets));
         }
         for attachment in &item.attachments {
-            let action = if attachment.drive_sharing == Some(DriveSharing::IndividualCopy) {
-                Some(Message::OpenItem(item.course_id, item.id.clone()))
-            } else {
-                self.attachment_action(attachment)
-            };
-            details = details.push(button(row![
-                icon(Icon::Book, BLUE, 16),
-                text(&attachment.title).size(14).color(FG).width(Fill),
-                icon(Icon::Arrow, MUTED, 14),
-            ].spacing(8).align_y(Alignment::Center)).padding([7, 10]).width(Fill)
-                .style(outline_style).on_press_maybe(action));
+            details = details.push(self.stream_attachment_row(item, attachment));
         }
         container(column![row, container(details).padding([3, 14]).width(Fill)].spacing(4))
             .width(Fill).padding(Padding { bottom: 11.0, ..Padding::ZERO }).style(|_| outline_surface(9.0)).into()
     }
 
+    fn stream_attachment_row<'a>(&'a self, item: &'a Coursework, attachment: &'a desktop_data::Attachment) -> Element<'a, Message> {
+        let template = attachment.drive_sharing == Some(DriveSharing::IndividualCopy);
+        let action = if template {
+            Some(Message::OpenItem(item.course_id, item.id.clone()))
+        } else {
+            self.attachment_action(attachment)
+        };
+        let file = button(row![
+            icon(Icon::Book, BLUE, 16),
+            text(&attachment.title).size(14).color(FG).width(Fill).wrapping(text::Wrapping::WordOrGlyph),
+            icon(Icon::Arrow, MUTED, 14),
+        ].spacing(8).align_y(Alignment::Center)).padding([7, 10]).width(Fill)
+            .style(outline_style).on_press_maybe(action);
+        let mut row = row![file].spacing(6).align_y(Alignment::Center);
+        if !template && let Some(browser) = self.attachment_browser_button(attachment) {
+            row = row.push(browser);
+        }
+        row.into()
+    }
+
     fn attachment_action(&self, attachment: &desktop_data::Attachment) -> Option<Message> {
+        #[cfg(target_os = "macos")]
+        if self.can_read_pages() && attachment.drive_reference.is_some()
+            && attachment.kind != desktop_data::AttachmentKind::Form
+        {
+            return (!self.preparing_drive_preview).then(|| Message::PreviewDriveFile(attachment.clone()));
+        }
+        self.attachment_browser_action(attachment)
+    }
+
+    fn attachment_browser_button<'a>(&'a self, attachment: &desktop_data::Attachment) -> Option<Element<'a, Message>> {
+        if !self.can_read_pages() || attachment.drive_reference.is_none()
+            || attachment.kind == desktop_data::AttachmentKind::Form
+        {
+            return None;
+        }
+        Some(button("Open in browser").padding([7, 10]).style(quiet_style)
+            .on_press_maybe(self.attachment_browser_action(attachment)).into())
+    }
+
+    fn attachment_browser_action(&self, attachment: &desktop_data::Attachment) -> Option<Message> {
         if self.verify_live_course_count {
             return None;
         }
         let url = attachment.url.as_deref().filter(|url| trusted_attachment_host(url).is_some());
         if let Some(id) = attachment.drive_reference.as_deref()
-            && attachment.kind == desktop_data::AttachmentKind::DriveFile
+            && attachment.kind != desktop_data::AttachmentKind::Form
         {
             if let Some(url) = url.filter(|url| desktop_auth::drive_url_reference(url).as_deref() == Some(id)) {
                 return Some(Message::OpenAttachment(url.to_owned()));
@@ -8811,9 +8905,7 @@ impl App {
                                 .wrapping(text::Wrapping::WordOrGlyph));
                         }
                         for attachment in &student.attachments {
-                            detail = detail.push(button(attachment.title.as_str()).style(outline_style).padding([7, 10])
-                                .on_press_maybe(attachment.url.as_ref().filter(|url| trusted_attachment_host(url).is_some())
-                                    .map(|url| Message::OpenAttachment(url.clone()))));
+                            detail = detail.push(self.stream_attachment_row(item, attachment));
                         }
                         if student.released_grade.is_none() && student.draft_grade.is_none() && student.answer.is_none()
                             && student.attachments.is_empty()
@@ -9097,6 +9189,9 @@ impl App {
                     let open = button(text(label)).padding([8, 10]).style(outline_style)
                         .on_press_maybe(self.attachment_action(attachment));
                     let mut line = row![open].spacing(7).align_y(Alignment::Center);
+                    if let Some(browser) = self.attachment_browser_button(attachment) {
+                        line = line.push(browser);
+                    }
                     #[cfg(target_os = "macos")]
                     if self.can_read_pages() && attachment.kind == desktop_data::AttachmentKind::DriveFile
                         && attachment.drive_reference.is_some()
@@ -9364,6 +9459,9 @@ impl App {
                 ].spacing(12).align_y(Alignment::Center);
                 attachments = attachments.push(button(content).width(Fill).padding(13)
                     .style(outline_style).on_press_maybe(action));
+                if let Some(browser) = file.and_then(|file| self.attachment_browser_button(file)) {
+                    attachments = attachments.push(browser);
+                }
                 #[cfg(target_os = "macos")]
                 if let Some(file) = file.filter(|file| self.can_read_pages()
                     && file.kind == desktop_data::AttachmentKind::DriveFile && file.drive_reference.is_some())

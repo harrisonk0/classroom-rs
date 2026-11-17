@@ -11,7 +11,7 @@ async fn main() {
         Ok(session) => session,
         Err(error) => { println!("Session failed: {error}"); return; }
     };
-    if std::env::args().nth(1).as_deref() == Some("--attachment-save-check") {
+    if let Some(mode @ ("--attachment-save-check" | "--attachment-preview-check")) = std::env::args().nth(1).as_deref() {
         let args: Vec<_> = std::env::args().skip(2).collect();
         let [course, item, file] = args.as_slice() else {
             panic!("Pass the course ID, item ID and Drive ID of one visible binary attachment");
@@ -24,9 +24,15 @@ async fn main() {
             .find(|entry| entry.drive_reference.as_deref() == Some(file.as_str()))
             .expect("Confirm the selected attachment belongs to the published item");
         let directory = tempfile::tempdir().expect("Create a temporary download destination");
-        let output = directory.path().join("attachment.bin");
-        auth::save_drive_file(&session, file, attachment.url.as_deref(), &output)
-            .await.expect("Download the exact attachment without modifying Drive");
+        let output = if mode == "--attachment-preview-check" {
+            auth::preview_drive_file(&session, file, attachment.url.as_deref(), directory.path())
+                .await.expect("Prepare the exact attachment for Quick Look")
+        } else {
+            let output = directory.path().join("attachment.bin");
+            auth::save_drive_file(&session, file, attachment.url.as_deref(), &output)
+                .await.expect("Download the exact attachment without modifying Drive");
+            output
+        };
         let bytes = std::fs::metadata(&output).expect("Read the saved file length").len();
         assert!(bytes > 0);
         directory.close().expect("Remove the temporary download");

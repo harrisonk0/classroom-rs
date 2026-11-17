@@ -61,7 +61,7 @@ mod comment_delete;
 mod class_calendar;
 pub use comment_delete::{CommentAudience, check_class_comment_target, delete_own_comment, moderate_class_comment};
 mod drive_files;
-pub use drive_files::{DriveFilePage, DriveFolder, DriveLocation, list_drive_files, lookup_drive_file_link, save_drive_file};
+pub use drive_files::{DriveFilePage, DriveFolder, DriveLocation, list_drive_files, lookup_drive_file_link, preview_drive_file, save_drive_file};
 pub use class_order::{CoursePlacement, reorder_class};
 pub use class_visibility::{class_visibility_for, set_class_hidden};
 pub use stream_posts::{
