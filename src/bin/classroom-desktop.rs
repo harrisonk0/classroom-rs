@@ -10045,8 +10045,14 @@ fn class_member_email_url(members: &[desktop_auth::ClassMention], member: i64) -
     let mut matching = members.iter().filter(|entry| entry.id == member);
     let email = &matching.next()?.email;
     if matching.next().is_some() { return None; }
-    let encoded: String = form_urlencoded::byte_serialize(email.as_bytes()).collect();
-    Some(format!("mailto:{encoded}"))
+    let (local, domain) = email.split_once('@')?;
+    if local.is_empty() || domain.is_empty()
+        || !domain.bytes().all(|byte| byte.is_ascii_alphanumeric() || b".-".contains(&byte))
+    {
+        return None;
+    }
+    let encoded: String = form_urlencoded::byte_serialize(local.as_bytes()).collect();
+    Some(format!("mailto:{encoded}@{domain}"))
 }
 
 fn matching_personal_copy<'a>(item: &'a Coursework, template: &desktop_data::Attachment) -> Option<&'a desktop_data::Attachment> {
@@ -10424,7 +10430,7 @@ mod tests {
             desktop_auth::ClassMention { id: 7, name: "Teacher".into(), email: "first+tag@example.org".into() },
             desktop_auth::ClassMention { id: 8, name: "Student".into(), email: "second@example.org".into() },
         ];
-        assert_eq!(class_member_email_url(&members, 7).as_deref(), Some("mailto:first%2Btag%40example.org"));
+        assert_eq!(class_member_email_url(&members, 7).as_deref(), Some("mailto:first%2Btag@example.org"));
         assert!(class_member_email_url(&members, 9).is_none());
         let mut duplicate = members.clone();
         duplicate.push(duplicate[0].clone());
