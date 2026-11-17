@@ -24,6 +24,8 @@ use tonic::{Code, Status, transport::Channel};
 use zeroize::Zeroizing;
 
 mod email_notifications;
+mod mentions;
+pub use mentions::{ClassMention, load_class_mentions};
 mod stream_posts;
 mod stream_settings;
 mod student_muting;
