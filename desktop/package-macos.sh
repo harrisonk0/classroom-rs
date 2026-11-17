@@ -75,8 +75,8 @@ cat > "$contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key><string>Classroom for Mac</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-  <key>CFBundleShortVersionString</key><string>0.77.0</string>
-  <key>CFBundleVersion</key><string>77</string>
+  <key>CFBundleShortVersionString</key><string>0.78.0</string>
+  <key>CFBundleVersion</key><string>78</string>
   <key>NSMicrophoneUsageDescription</key><string>Record audio when you choose to add a recording to an assignment.</string>
   <key>NSCameraUsageDescription</key><string>Record video when you choose to add a recording to an assignment.</string>
   <key>NSScreenCaptureUsageDescription</key><string>Record the screen area you select for an assignment.</string>

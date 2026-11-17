@@ -119,7 +119,7 @@ def main():
     email = sys.stdin.readline(257).strip().lower()
     local, _, domain = email.partition("@")
     domain_label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-    if (not re.fullmatch(r"[a-z0-9._+-]{1,128}", local)
+    if (len(email) > 254 or not re.fullmatch(r"[a-z0-9._+-]{1,128}", local)
             or len(domain) > 253
             or not re.fullmatch(rf"{domain_label}(?:\.{domain_label})+", domain)):
         print('{"stage":"input","reason":"invalid-email"}', flush=True)

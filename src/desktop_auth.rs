@@ -297,7 +297,7 @@ async fn issue_token(account: &str, mode: SignInMode) -> Result<ClassroomToken, 
 
 fn normalize_account(email: &str) -> Result<String, String> {
     let account = email.trim().to_ascii_lowercase();
-    let valid = account.split_once('@').is_some_and(|(name, domain)| {
+    let valid = account.len() <= 254 && account.split_once('@').is_some_and(|(name, domain)| {
         domain.len() <= 253
             && domain.contains('.')
             && domain.split('.').all(|label| {
@@ -2914,7 +2914,12 @@ mod tests {
     #[test]
     fn sign_in_normalizes_and_bounds_account_input() {
         assert_eq!(normalize_account(" Fixture@EXAMPLE.ORG ").unwrap(), "fixture@example.org");
+        assert_eq!(normalize_account("fixture@school.example").unwrap(), "fixture@school.example");
         assert!(normalize_account("fixture@-example.org").is_err());
+        assert!(normalize_account("fixture@example..org").is_err());
+        assert!(normalize_account("fixture@example.org@example.org").is_err());
+        let long = format!("{}@{}.{}.example", "a".repeat(128), "b".repeat(63), "c".repeat(63));
+        assert!(normalize_account(&long).is_err());
         assert!(normalize_account("fixture@example.org\nsecond@example.org").is_err());
     }
 }
