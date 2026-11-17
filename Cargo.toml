@@ -25,6 +25,7 @@ prost = "0.14"
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+tempfile = { version = "3.27", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "process", "time"] }
 tonic = { version = "0.14", features = ["tls-ring", "tls-webpki-roots"] }
 tonic-prost = "0.14"
@@ -37,7 +38,6 @@ tonic-prost-build = "0.14"
 block2 = { version = "0.5.1", optional = true }
 objc2 = { version = "0.5.3", optional = true }
 objc2-foundation = { version = "0.2.2", features = ["NSDictionary", "NSString", "NSURL", "NSValue"], optional = true }
-tempfile = { version = "3.27", optional = true }
 
 [dev-dependencies]
 tokio-stream = { version = "0.1", features = ["net"] }

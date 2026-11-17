@@ -11,6 +11,28 @@ async fn main() {
         Ok(session) => session,
         Err(error) => { println!("Session failed: {error}"); return; }
     };
+    if std::env::args().nth(1).as_deref() == Some("--attachment-save-check") {
+        let args: Vec<_> = std::env::args().skip(2).collect();
+        let [course, item, file] = args.as_slice() else {
+            panic!("Pass the course ID, item ID and Drive ID of one visible binary attachment");
+        };
+        let course = course.parse().expect("Read a positive class ID");
+        assert!(session.snapshot.courses.iter().any(|entry| entry.id == course));
+        let contents = auth::load_coursework(&session, course).await.expect("Read the selected class's published work");
+        let attachment = contents.items.iter().filter(|entry| &entry.id == item)
+            .flat_map(|entry| &entry.attachments)
+            .find(|entry| entry.drive_reference.as_deref() == Some(file.as_str()))
+            .expect("Confirm the selected attachment belongs to the published item");
+        let directory = tempfile::tempdir().expect("Create a temporary download destination");
+        let output = directory.path().join("attachment.bin");
+        auth::save_drive_file(&session, file, attachment.url.as_deref(), &output)
+            .await.expect("Download the exact attachment without modifying Drive");
+        let bytes = std::fs::metadata(&output).expect("Read the saved file length").len();
+        assert!(bytes > 0);
+        directory.close().expect("Remove the temporary download");
+        println!("Selected attachment saved and temporary file removed; bytes={bytes}");
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--mention-coverage") {
         let course = session.snapshot.courses.iter().find(|course| course.shows_on_home())
             .expect("Read one visible class");
