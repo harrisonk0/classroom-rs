@@ -448,6 +448,10 @@ enum Message {
     OpenItem(i64, String),
     CloseItem,
     EditComment(i64, i64, String),
+    OpenCommentMentions(i64, i64),
+    CommentMentionsLoaded(u64, i64, i64, Result<Vec<desktop_auth::ClassMention>, String>),
+    InsertCommentMention(i64, i64, i64),
+    CloseCommentMentions,
     PostComment(i64, i64),
     EditPrivateComment(i64, i64, String),
     PostPrivateComment(i64, i64),
@@ -748,6 +752,10 @@ impl fmt::Debug for Message {
             Self::OpenItem(_, _) => "OpenItem",
             Self::CloseItem => "CloseItem",
             Self::EditComment(..) => "EditComment",
+            Self::OpenCommentMentions(..) => "OpenCommentMentions",
+            Self::CommentMentionsLoaded(..) => "CommentMentionsLoaded",
+            Self::InsertCommentMention(..) => "InsertCommentMention",
+            Self::CloseCommentMentions => "CloseCommentMentions",
             Self::PostComment(..) => "PostComment",
             Self::EditPrivateComment(..) => "EditPrivateComment",
             Self::PostPrivateComment(..) => "PostPrivateComment",
@@ -1022,6 +1030,13 @@ impl AssignmentEditor {
 struct AssignmentPublicationPrompt {
     draft: desktop_auth::TeacherDraft,
     schedule: Option<String>,
+}
+
+struct CommentMentions {
+    course: i64,
+    item: i64,
+    entries: Option<Vec<desktop_auth::ClassMention>>,
+    error: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -1518,6 +1533,8 @@ struct App {
     open_criteria: BTreeSet<usize>,
     page_errors: BTreeMap<PageRead, String>,
     comment_drafts: BTreeMap<(i64, i64), String>,
+    comment_mentions_generation: u64,
+    comment_mentions: Option<CommentMentions>,
     comment_unconfirmed: BTreeSet<(i64, i64)>,
     posting_comment: bool,
     class_code: String,
@@ -1662,6 +1679,8 @@ impl App {
             open_criteria: BTreeSet::new(),
             page_errors: BTreeMap::new(),
             comment_drafts: BTreeMap::new(),
+            comment_mentions_generation: 0,
+            comment_mentions: None,
             comment_unconfirmed: BTreeSet::new(),
             posting_comment: false,
             class_code: String::new(),
@@ -1898,6 +1917,8 @@ impl App {
             }
             Message::Navigate(screen) => {
                 if self.screen != screen {
+                    self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
+                    self.comment_mentions = None;
                     if screen == Screen::CreateClass {
                         if !self.can_create_class() || self.has_pending_request() {
                             return Task::none();
@@ -3351,6 +3372,45 @@ impl App {
                     self.comment_drafts.insert((course, item), draft);
                 }
             }
+            Message::OpenCommentMentions(course, item) if self.can_compose_class_comment(course, item)
+                && !self.has_pending_request() =>
+            {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
+                let generation = self.comment_mentions_generation;
+                self.comment_mentions = Some(CommentMentions { course, item, entries: None, error: None });
+                return Task::perform(async move { desktop_auth::load_class_mentions(&session, course).await },
+                    move |result| Message::CommentMentionsLoaded(generation, course, item, result));
+            }
+            Message::CommentMentionsLoaded(generation, course, item, result)
+                if generation == self.comment_mentions_generation && self.can_compose_class_comment(course, item) =>
+            {
+                if let Some(picker) = self.comment_mentions.as_mut()
+                    .filter(|picker| picker.course == course && picker.item == item)
+                {
+                    match result {
+                        Ok(entries) => picker.entries = Some(entries),
+                        Err(error) => picker.error = Some(error),
+                    }
+                }
+            }
+            Message::InsertCommentMention(course, item, member) if self.can_compose_class_comment(course, item)
+                && !self.has_pending_request() =>
+            {
+                let Some(email) = self.comment_mentions.as_ref()
+                    .filter(|picker| picker.course == course && picker.item == item)
+                    .and_then(|picker| picker.entries.as_ref())
+                    .and_then(|entries| entries.iter().find(|entry| entry.id == member))
+                    .map(|entry| entry.email.clone())
+                    else { return Task::none(); };
+                let draft = self.comment_drafts.entry((course, item)).or_default();
+                append_comment_mention(draft, &email);
+                self.comment_mentions = None;
+            }
+            Message::CloseCommentMentions => {
+                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
+                self.comment_mentions = None;
+            }
             Message::PostComment(course, item)
                 if !self.has_pending_request() && self.can_compose_class_comment(course, item)
                     && !self.comment_unconfirmed.contains(&(course, item)) =>
@@ -3844,6 +3904,8 @@ impl App {
                 }
             }
             Message::OpenItem(course, item) => {
+                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
+                self.comment_mentions = None;
                 self.teacher_work = None;
                 self.teacher_feedback.clear();
                 self.gradebook_student = None;
@@ -3867,6 +3929,8 @@ impl App {
                 self.queued_page_load = true;
             }
             Message::CloseItem => {
+                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
+                self.comment_mentions = None;
                 self.teacher_work = None;
                 self.teacher_feedback.clear();
                 self.gradebook_student = None;
@@ -5056,6 +5120,8 @@ impl App {
                 self.confirming_decline = None;
                 self.confirming_unenroll = None;
                 self.comment_drafts.clear();
+                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
+                self.comment_mentions = None;
                 self.short_answer_drafts.clear();
                 self.short_answer_revisions.clear();
                 self.choice_drafts.clear();
@@ -8930,10 +8996,41 @@ impl App {
                 comments = comments.push(row![
                     text_input("Add a class comment…", draft).padding(10).width(Fill)
                         .on_input(move |value| Message::EditComment(course_id, stream_item_id, value)),
+                    button("@").padding([9, 12]).style(outline_style)
+                        .on_press_maybe((!self.has_pending_request())
+                            .then_some(Message::OpenCommentMentions(course_id, stream_item_id))),
                     button(if self.posting_comment { "Posting…" } else { "Post" })
                         .padding([9, 13]).style(primary_style)
                         .on_press_maybe(allowed.then_some(Message::PostComment(course_id, stream_item_id))),
                 ].spacing(8).align_y(Alignment::Center));
+                if let Some(picker) = self.comment_mentions.as_ref()
+                    .filter(|picker| picker.course == course_id && picker.item == stream_item_id)
+                {
+                    let mut list = column![
+                        row![
+                            text("Mention a class member").size(15).font(medium()).width(Fill),
+                            button("Close").style(quiet_style).on_press(Message::CloseCommentMentions),
+                        ].align_y(Alignment::Center)
+                    ].spacing(6);
+                    if let Some(error) = &picker.error {
+                        list = list.push(text(error).size(13).color(color!(0x9b2722)));
+                    } else if let Some(entries) = &picker.entries {
+                        if entries.is_empty() {
+                            list = list.push(text("No member email addresses are available.").size(13).color(MUTED));
+                        }
+                        for member in entries {
+                            list = list.push(button(column![
+                                text(&member.name).size(14),
+                                text(&member.email).size(12).color(MUTED),
+                            ].spacing(2)).width(Fill).padding(8).style(quiet_style)
+                                .on_press(Message::InsertCommentMention(course_id, stream_item_id, member.id)));
+                        }
+                    } else {
+                        list = list.push(text("Loading class members…").size(13).color(MUTED));
+                    }
+                    comments = comments.push(container(scrollable(list).height(200)).padding(10)
+                        .style(|_| outline_surface(9.0)).width(Fill));
+                }
             }
         }
         match item.comments.as_deref() {
@@ -9706,6 +9803,16 @@ fn matching_personal_copy<'a>(item: &'a Coursework, template: &desktop_data::Att
     (copy.kind == desktop_data::AttachmentKind::DriveFile).then_some(copy)
 }
 
+fn append_comment_mention(draft: &mut String, email: &str) {
+    let prefix = if draft.is_empty() || draft.ends_with(char::is_whitespace) { "" } else { " " };
+    if draft.len() + prefix.len() + email.len() + 2 <= 10_000 {
+        draft.push_str(prefix);
+        draft.push('+');
+        draft.push_str(email);
+        draft.push(' ');
+    }
+}
+
 fn valid_host_label(label: &str) -> bool {
     !label.is_empty() && !label.starts_with('-') && !label.ends_with('-')
         && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
@@ -10020,6 +10127,18 @@ mod tests {
         let mut snapshot = Snapshot::demo();
         snapshot.source = SnapshotSource::Live;
         (app, snapshot)
+    }
+
+    #[test]
+    fn comment_mention_preserves_draft_spacing_and_length_limit() {
+        let mut draft = "Thanks".to_owned();
+        append_comment_mention(&mut draft, "student@example.org");
+        assert_eq!(draft, "Thanks +student@example.org ");
+        append_comment_mention(&mut draft, "teacher@example.org");
+        assert_eq!(draft, "Thanks +student@example.org +teacher@example.org ");
+        let mut full = "x".repeat(9_999);
+        append_comment_mention(&mut full, "student@example.org");
+        assert_eq!(full.len(), 9_999);
     }
 
     #[test]
