@@ -61,10 +61,14 @@ pub fn suggested_name(title: &str) -> String {
 }
 
 pub async fn choose_destination(suggested: String) -> Result<Option<PathBuf>, String> {
+    choose_file_destination(suggested, "Export released grades as CSV").await
+}
+
+pub async fn choose_file_destination(suggested: String, prompt: &str) -> Result<Option<PathBuf>, String> {
     let script = r#"
         on run argv
             try
-                set destination to choose file name with prompt "Export released grades as CSV" default name (item 1 of argv) default location (path to downloads folder)
+                set destination to choose file name with prompt (item 2 of argv) default name (item 1 of argv) default location (path to downloads folder)
                 return POSIX path of destination
             on error number -128
                 return ""
@@ -72,7 +76,7 @@ pub async fn choose_destination(suggested: String) -> Result<Option<PathBuf>, St
         end run
     "#;
     let output = tokio::process::Command::new("/usr/bin/osascript")
-        .args(["-e", script, "--", &suggested]).kill_on_drop(true).output().await
+        .args(["-e", script, "--", &suggested, prompt]).kill_on_drop(true).output().await
         .map_err(|_| "The Mac save dialog could not open.")?;
     if !output.status.success() {
         return Err("The Mac save dialog did not return a destination.".into());

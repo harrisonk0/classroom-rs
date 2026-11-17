@@ -1,4 +1,5 @@
 use super::{DriveFileAttachment, LiveSession, drive_url_reference, run_drive_helper};
+use std::path::Path;
 use serde::Deserialize;
 use std::{collections::BTreeSet, time::Duration};
 use zeroize::Zeroizing;
@@ -126,6 +127,45 @@ pub async fn lookup_drive_file_link(session: &LiveSession, file_id: &str) -> Res
     confirmed_file_link(reply, file_id)
 }
 
+#[derive(Deserialize)]
+struct SavedFile {
+    saved: bool,
+}
+
+fn resource_key_for_file(url: Option<&str>, file_id: &str) -> Result<Option<String>, String> {
+    let Some(url) = url else { return Ok(None) };
+    if drive_url_reference(url).as_deref() != Some(file_id) {
+        return Err("The attachment link does not match its Drive file.".into());
+    }
+    let uri: tonic::codegen::http::Uri = url.parse().map_err(|_| "Invalid attachment link.")?;
+    let mut keys = uri.query().into_iter().flat_map(|query| form_urlencoded::parse(query.as_bytes()))
+        .filter(|(key, _)| key.eq_ignore_ascii_case("resourcekey"))
+        .map(|(_, value)| value.into_owned());
+    let Some(key) = keys.next() else { return Ok(None) };
+    if keys.next().is_some() || !valid_drive_id(&key) {
+        return Err("The attachment has an invalid Drive resource key.".into());
+    }
+    Ok(Some(key))
+}
+
+pub async fn save_drive_file(
+    session: &LiveSession, file_id: &str, url: Option<&str>, destination: &Path,
+) -> Result<(), String> {
+    if !valid_drive_id(file_id) {
+        return Err("Invalid Drive file ID.".into());
+    }
+    let resource_key = resource_key_for_file(url, file_id)?;
+    let destination = destination.to_str().ok_or("The destination path is not valid UTF-8.")?;
+    let bearer = session.bearer_for_request(None).await?;
+    let payload = Zeroizing::new(serde_json::to_vec(&serde_json::json!({
+        "file_id": file_id, "destination": destination, "resource_key": resource_key,
+        "bearer": bearer.as_str(),
+    })).map_err(|_| "Could not prepare the file download.")?);
+    let reply: SavedFile = run_drive_helper(&["--download"], payload, Duration::from_secs(600),
+        "Drive did not finish downloading the file.").await?;
+    if reply.saved { Ok(()) } else { Err("Drive did not confirm the file was saved.".into()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +181,15 @@ mod tests {
         assert!(confirmed_file_link(reply("different-file", link, false), "exact-file").is_err());
         assert!(confirmed_file_link(reply("exact-file", link, true), "exact-file").is_err());
         assert!(confirmed_file_link(reply("exact-file", "https://drive.google.com/file/d/different-file/view", false), "exact-file").is_err());
+    }
+
+    #[test]
+    fn resource_keys_require_a_matching_file_and_a_single_valid_value() {
+        let url = "https://drive.google.com/file/d/exact-file/view?resourcekey=opaque-key";
+        assert_eq!(resource_key_for_file(Some(url), "exact-file").unwrap().as_deref(), Some("opaque-key"));
+        assert!(resource_key_for_file(Some(url), "different").is_err());
+        assert!(resource_key_for_file(Some("https://drive.google.com/open?id=exact-file&resourcekey=a&resourcekey=b"), "exact-file").is_err());
+        assert_eq!(resource_key_for_file(None, "exact-file").unwrap(), None);
     }
 
     #[test]
