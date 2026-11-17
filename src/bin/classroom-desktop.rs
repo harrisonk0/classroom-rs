@@ -451,6 +451,9 @@ enum Message {
     CloseItem,
     EditComment(i64, i64, String),
     OpenCommentMentions(i64, i64),
+    EmailClassMember(i64, i64),
+    ClassMemberEmailLoaded(u64, i64, i64, Result<Vec<desktop_auth::ClassMention>, String>),
+    ClassMemberEmailOpened(bool),
     CommentMentionsLoaded(u64, i64, i64, Result<Vec<desktop_auth::ClassMention>, String>),
     InsertCommentMention(i64, i64, i64),
     CloseCommentMentions,
@@ -759,6 +762,9 @@ impl fmt::Debug for Message {
             Self::CloseItem => "CloseItem",
             Self::EditComment(..) => "EditComment",
             Self::OpenCommentMentions(..) => "OpenCommentMentions",
+            Self::EmailClassMember(..) => "EmailClassMember",
+            Self::ClassMemberEmailLoaded(..) => "ClassMemberEmailLoaded",
+            Self::ClassMemberEmailOpened(_) => "ClassMemberEmailOpened",
             Self::CommentMentionsLoaded(..) => "CommentMentionsLoaded",
             Self::InsertCommentMention(..) => "InsertCommentMention",
             Self::CloseCommentMentions => "CloseCommentMentions",
@@ -1543,6 +1549,8 @@ struct App {
     open_criteria: BTreeSet<usize>,
     page_errors: BTreeMap<PageRead, String>,
     comment_drafts: BTreeMap<(i64, i64), String>,
+    people_email_generation: u64,
+    people_email_pending: Option<(i64, i64)>,
     comment_mentions_generation: u64,
     comment_mentions: Option<CommentMentions>,
     comment_unconfirmed: BTreeSet<(i64, i64)>,
@@ -1693,6 +1701,8 @@ impl App {
             open_criteria: BTreeSet::new(),
             page_errors: BTreeMap::new(),
             comment_drafts: BTreeMap::new(),
+            people_email_generation: 0,
+            people_email_pending: None,
             comment_mentions_generation: 0,
             comment_mentions: None,
             comment_unconfirmed: BTreeSet::new(),
@@ -1935,6 +1945,7 @@ impl App {
             }
             Message::Navigate(screen) => {
                 if self.screen != screen {
+                    self.invalidate_people_email();
                     self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
                     self.comment_mentions = None;
                     if screen == Screen::CreateClass {
@@ -2372,6 +2383,7 @@ impl App {
                     return Task::none();
                 }
                 if self.tab != tab {
+                    self.invalidate_people_email();
                     self.drive_picker = None;
                     self.pending_student_mute = None;
                     self.topic_editor = None;
@@ -3425,6 +3437,39 @@ impl App {
                     self.comment_drafts.insert((course, item), draft);
                 }
             }
+            Message::EmailClassMember(course, member) if self.can_email_class_member(course, member)
+                && self.people_email_pending.is_none() && !self.has_pending_request() =>
+            {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                self.people_email_generation = self.people_email_generation.wrapping_add(1);
+                let generation = self.people_email_generation;
+                self.people_email_pending = Some((course, member));
+                self.error = None;
+                return Task::perform(async move { desktop_auth::load_class_mentions(&session, course).await },
+                    move |result| Message::ClassMemberEmailLoaded(generation, course, member, result));
+            }
+            Message::ClassMemberEmailLoaded(generation, course, member, result)
+                if generation == self.people_email_generation && self.people_email_pending == Some((course, member)) =>
+            {
+                self.people_email_pending = None;
+                if !self.can_email_class_member(course, member) { return Task::none(); }
+                match result {
+                    Ok(members) => {
+                        let Some(url) = class_member_email_url(&members, member) else {
+                            self.error = Some("No email address is available for this class member.".into());
+                            return Task::none();
+                        };
+                        return Task::perform(async move {
+                            tokio::process::Command::new("/usr/bin/open").arg(url)
+                                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                                .status().await.is_ok_and(|status| status.success())
+                        }, Message::ClassMemberEmailOpened);
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
+            Message::ClassMemberEmailOpened(false) => self.error = Some("The email app couldn't be opened.".into()),
+            Message::ClassMemberEmailOpened(true) => {}
             Message::OpenCommentMentions(course, item) if self.can_compose_class_comment(course, item)
                 && !self.has_pending_request() =>
             {
@@ -5210,6 +5255,7 @@ impl App {
                 self.confirming_decline = None;
                 self.confirming_unenroll = None;
                 self.comment_drafts.clear();
+                self.invalidate_people_email();
                 self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
                 self.comment_mentions = None;
                 self.short_answer_drafts.clear();
@@ -5715,6 +5761,7 @@ impl App {
     }
 
     fn install_snapshot(&mut self, snapshot: Snapshot) {
+        self.invalidate_people_email();
         self.reset_personal_copy();
         self.teachers_generation = self.teachers_generation.wrapping_add(1);
         self.class_teachers.clear();
@@ -8088,6 +8135,17 @@ impl App {
                 members.iter().any(|member| member.role == CourseRole::Student && member.id.parse::<i64>().ok() == Some(student)))
     }
 
+    fn invalidate_people_email(&mut self) {
+        self.people_email_generation = self.people_email_generation.wrapping_add(1);
+        self.people_email_pending = None;
+    }
+
+    fn can_email_class_member(&self, course: i64, member: i64) -> bool {
+        self.can_read_pages() && self.screen == Screen::Course(course) && self.tab == Tab::People
+            && self.snapshot.as_ref().and_then(|snapshot| snapshot.roster_for(course))
+                .is_some_and(|members| members.iter().any(|entry| entry.id.parse::<i64>().ok() == Some(member)))
+    }
+
     fn people(&self, id: i64) -> Element<'_, Message> {
         let roster = self.snapshot.as_ref().and_then(|snapshot| snapshot.roster_for(id));
         let mut body = column![].spacing(14);
@@ -8124,6 +8182,15 @@ impl App {
                         space().width(Fill),
                         text(member.role.label()).size(13).color(MUTED),
                     ].spacing(12).align_y(Alignment::Center).padding(12);
+                    if let Ok(person) = member.id.parse::<i64>()
+                        && self.can_email_class_member(id, person)
+                    {
+                        let pending = self.people_email_pending == Some((id, person));
+                        line = line.push(button(if pending { "Opening…" } else { "Email" })
+                            .padding([7, 10]).style(quiet_style)
+                            .on_press_maybe((self.people_email_pending.is_none() && !self.has_pending_request())
+                                .then_some(Message::EmailClassMember(id, person))));
+                    }
                     if moderator && member.role == CourseRole::Student
                         && let Ok(student) = member.id.parse::<i64>()
                         && let Some(&muted) = self.student_muting.get(&id).and_then(|rows| rows.get(&student))
@@ -9974,6 +10041,14 @@ fn eligible_personal_copy_template(work: &Coursework) -> Option<String> {
         .then(|| reference.clone())
 }
 
+fn class_member_email_url(members: &[desktop_auth::ClassMention], member: i64) -> Option<String> {
+    let mut matching = members.iter().filter(|entry| entry.id == member);
+    let email = &matching.next()?.email;
+    if matching.next().is_some() { return None; }
+    let encoded: String = form_urlencoded::byte_serialize(email.as_bytes()).collect();
+    Some(format!("mailto:{encoded}"))
+}
+
 fn matching_personal_copy<'a>(item: &'a Coursework, template: &desktop_data::Attachment) -> Option<&'a desktop_data::Attachment> {
     let mut matches = item.submission.as_ref()?.attachments.iter().filter(|file| file.is_personal_copy_of(template));
     let copy = matches.next()?;
@@ -10341,6 +10416,34 @@ mod tests {
         assert_eq!(app.screen, Screen::Home);
         assert!(app.submission_capture.is_none());
         assert_ne!(app.capture_generation, generation);
+    }
+
+    #[test]
+    fn class_member_email_link_uses_one_exact_recipient_and_escapes_mailto_fields() {
+        let members = vec![
+            desktop_auth::ClassMention { id: 7, name: "Teacher".into(), email: "first+tag@example.org".into() },
+            desktop_auth::ClassMention { id: 8, name: "Student".into(), email: "second@example.org".into() },
+        ];
+        assert_eq!(class_member_email_url(&members, 7).as_deref(), Some("mailto:first%2Btag%40example.org"));
+        assert!(class_member_email_url(&members, 9).is_none());
+        let mut duplicate = members.clone();
+        duplicate.push(duplicate[0].clone());
+        assert!(class_member_email_url(&duplicate, 7).is_none());
+    }
+
+    #[test]
+    fn leaving_people_invalidates_pending_email_lookup() {
+        let (mut app, snapshot) = fixture();
+        app.install_snapshot(snapshot);
+        app.screen = Screen::Course(1);
+        app.tab = Tab::People;
+        app.people_email_pending = Some((1, 7));
+        let generation = app.people_email_generation;
+        let _ = app.update(Message::SetTab(Tab::Stream));
+        assert_eq!(app.people_email_pending, None);
+        assert_ne!(app.people_email_generation, generation);
+        let _ = app.update(Message::ClassMemberEmailLoaded(generation, 1, 7, Ok(Vec::new())));
+        assert!(app.error.is_none());
     }
 
     fn fixture() -> (App, Snapshot) {
