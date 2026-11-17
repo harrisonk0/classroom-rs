@@ -7924,6 +7924,17 @@ impl App {
             .into()
     }
 
+    fn can_open_shared_question(&self, course: i64) -> bool {
+        self.screenshot_directory.is_some()
+            || shared_question_read_is_current(
+                self.can_read_pages(),
+                self.class_roles.get(&course).copied(),
+                self.submissions_checked.contains(&course),
+                self.page_errors.contains_key(&PageRead::Detail(DetailRead::Submissions(course))),
+                self.loading_detail == Some(DetailRead::Submissions(course)),
+            )
+    }
+
     fn can_read_pages(&self) -> bool {
         self.session.is_some() && !self.verify_live_course_count && !self.demo
             && self.snapshot.as_ref().is_some_and(|snapshot| snapshot.source == SnapshotSource::Live)
@@ -8770,6 +8781,12 @@ impl App {
             };
             if !visibility.is_empty() {
                 body = body.push(text(visibility).size(14).color(MUTED));
+            }
+            if self.can_open_shared_question(course_id)
+                && let Some((label, url)) = shared_question_link(item)
+            {
+                body = body.push(button(label).style(outline_style).padding([8, 12])
+                    .on_press(Message::OpenAttachment(url)));
             }
         }
         let question_key = item.id.parse::<i64>().ok().map(|id| (course_id, id));
@@ -9631,6 +9648,37 @@ fn item_link_kind(item: &Coursework) -> Option<ItemLinkKind> {
     }
 }
 
+fn shared_question_link(item: &Coursework) -> Option<(&'static str, String)> {
+    if item.kind != CourseworkKind::Question || item.question_sharing != Some(QuestionSharing::Course) {
+        return None;
+    }
+    let submission = item.submission.as_ref()?;
+    if !matches!(submission.status,
+        SubmissionStatus::TurnedIn | SubmissionStatus::TurnedInLate
+        | SubmissionStatus::Returned | SubmissionStatus::ReturnedLate)
+    {
+        return None;
+    }
+    let (label, kind) = match (&item.question, &submission.question_answer) {
+        (Some(QuestionDetails::ShortAnswer), Some(QuestionAnswer::ShortAnswer(answer))) if !answer.trim().is_empty() =>
+            ("See classmate answers in Classroom", ItemLinkKind::ShortAnswer),
+        (Some(QuestionDetails::MultipleChoice(choices)), Some(QuestionAnswer::MultipleChoice(answer)))
+            if matching_choice(choices, answer).is_some() =>
+            ("See class summary in Classroom", ItemLinkKind::MultipleChoice),
+        _ => return None,
+    };
+    let url = ClassroomLink::Item {
+        course: item.course_id, item: item.id.parse().ok()?, kind,
+    }.web_url()?;
+    Some((label, url))
+}
+
+fn shared_question_read_is_current(
+    connected: bool, role: Option<CourseRole>, checked: bool, failed: bool, loading: bool,
+) -> bool {
+    connected && role == Some(CourseRole::Student) && checked && !failed && !loading
+}
+
 fn hidden_course(course: &Course) -> bool {
     course.state.shows_on_home() && course.hidden == Some(true)
 }
@@ -10360,6 +10408,68 @@ mod tests {
         let mut full = "x".repeat(9_999);
         append_comment_mention(&mut full, "student@example.org");
         assert_eq!(full.len(), 9_999);
+    }
+
+    #[test]
+    fn shared_question_link_requires_a_submitted_matching_answer_and_explicit_sharing() {
+        let (_, snapshot) = fixture();
+        let mut question = snapshot.coursework.values().flatten()
+            .find(|item| item.kind == CourseworkKind::Question).unwrap().clone();
+        question.id = "42".into();
+        question.course_id = 8;
+        question.question = Some(QuestionDetails::ShortAnswer);
+        question.question_sharing = Some(QuestionSharing::Course);
+        question.submission = Some(Submission {
+            status: SubmissionStatus::TurnedIn,
+            question_answer: Some(QuestionAnswer::ShortAnswer("My answer".into())),
+            ..Default::default()
+        });
+        let (label, url) = shared_question_link(&question).unwrap();
+        assert_eq!(label, "See classmate answers in Classroom");
+        assert_eq!(ClassroomLink::parse(&url), Some(ClassroomLink::Item {
+            course: 8, item: 42, kind: ItemLinkKind::ShortAnswer,
+        }));
+        for status in [SubmissionStatus::Assigned, SubmissionStatus::Missing, SubmissionStatus::Reclaimed, SubmissionStatus::Unknown] {
+            question.submission.as_mut().unwrap().status = status;
+            assert!(shared_question_link(&question).is_none());
+        }
+        question.submission.as_mut().unwrap().status = SubmissionStatus::Returned;
+        assert!(shared_question_link(&question).is_some());
+        question.submission.as_mut().unwrap().status = SubmissionStatus::ReturnedLate;
+        assert!(shared_question_link(&question).is_some());
+        question.submission.as_mut().unwrap().question_answer = Some(QuestionAnswer::ShortAnswer(" ".into()));
+        assert!(shared_question_link(&question).is_none());
+        question.submission.as_mut().unwrap().question_answer = Some(QuestionAnswer::ShortAnswer("My answer".into()));
+        question.question_sharing = Some(QuestionSharing::Private);
+        assert!(shared_question_link(&question).is_none());
+        question.question_sharing = None;
+        assert!(shared_question_link(&question).is_none());
+        question.question_sharing = Some(QuestionSharing::Course);
+        question.question = Some(QuestionDetails::MultipleChoice(vec!["One".into(), "Two".into()]));
+        assert!(shared_question_link(&question).is_none());
+        question.submission.as_mut().unwrap().question_answer = Some(QuestionAnswer::MultipleChoice("One".into()));
+        let (label, url) = shared_question_link(&question).unwrap();
+        assert_eq!(label, "See class summary in Classroom");
+        assert_eq!(ClassroomLink::parse(&url), Some(ClassroomLink::Item {
+            course: 8, item: 42, kind: ItemLinkKind::MultipleChoice,
+        }));
+        question.submission.as_mut().unwrap().question_answer = Some(QuestionAnswer::MultipleChoice("Absent".into()));
+        assert!(shared_question_link(&question).is_none());
+        question.question = None;
+        assert!(shared_question_link(&question).is_none());
+        question.kind = CourseworkKind::Assignment;
+        assert!(shared_question_link(&question).is_none());
+    }
+
+    #[test]
+    fn shared_question_read_requires_current_student_submission_state() {
+        assert!(shared_question_read_is_current(true, Some(CourseRole::Student), true, false, false));
+        assert!(!shared_question_read_is_current(false, Some(CourseRole::Student), true, false, false));
+        assert!(!shared_question_read_is_current(true, Some(CourseRole::Teacher), true, false, false));
+        assert!(!shared_question_read_is_current(true, None, true, false, false));
+        assert!(!shared_question_read_is_current(true, Some(CourseRole::Student), false, false, false));
+        assert!(!shared_question_read_is_current(true, Some(CourseRole::Student), true, true, false));
+        assert!(!shared_question_read_is_current(true, Some(CourseRole::Student), true, false, true));
     }
 
     #[test]
