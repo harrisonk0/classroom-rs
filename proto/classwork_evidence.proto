@@ -39,6 +39,10 @@ message StreamReadMask {
 message AssignmentReadMask {
   optional StreamItemInfoReadMask stream_item_info_mask = 1;
   optional TaskInfoReadMask task_info_mask = 2;
+  optional OriginalitySettingsReadMask originality_settings_mask = 5;
+}
+message OriginalitySettingsReadMask {
+  optional bool include_state = 1;
 }
 message PostReadMask {
   optional StreamItemInfoReadMask stream_item_info_mask = 1;
@@ -120,6 +124,11 @@ message ReorderClassworkResponse {
 message Assignment {
   optional StreamItemInfo stream_item_info = 1;
   optional TaskInfo task_info = 2;
+  optional OriginalitySettings originality_settings = 5;
+}
+message OriginalitySettings {
+  // 0 unspecified, 1 enabled, 2 disabled.
+  optional int32 state = 1;
 }
 message Post {
   optional StreamItemInfo stream_item_info = 1;

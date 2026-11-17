@@ -38,6 +38,8 @@ pub use student_muting::{load_student_muting, set_student_muted};
 pub use stream_settings::{ClassDetails, CourseStreamSettings, StreamPostingPolicy, TeacherClassSettings, load_teacher_class_settings, save_teacher_class_settings};
 mod teacher_assignment;
 mod assignment_fields;
+mod originality;
+pub use originality::originality_report_url;
 mod teacher_submissions;
 pub use assignment_fields::{AssignmentDue, AssignmentFieldChanges, parse_assignment_due, parse_assignment_points};
 pub use teacher_assignment::{AssignmentPublication, assignment_draft_text_valid, change_assignment_publication, save_assignment_draft,
@@ -55,7 +57,7 @@ mod comment_delete;
 mod class_calendar;
 pub use comment_delete::{CommentAudience, check_class_comment_target, delete_own_comment, moderate_class_comment};
 mod drive_files;
-pub use drive_files::{DriveFilePage, DriveFolder, DriveLocation, list_drive_files};
+pub use drive_files::{DriveFilePage, DriveFolder, DriveLocation, list_drive_files, lookup_drive_file_link};
 pub use class_order::{CoursePlacement, reorder_class};
 pub use class_visibility::{class_visibility_for, set_class_hidden};
 pub use stream_posts::{
@@ -640,6 +642,7 @@ fn classwork_query(course_id: i64, drafts: bool) -> wire::StreamItemQueryRequest
         assignment_mask: Some(AssignmentReadMask {
             stream_item_info_mask: Some(info.clone()),
             task_info_mask: Some(task.clone()),
+            originality_settings_mask: (!drafts).then_some(OriginalitySettingsReadMask { include_state: Some(true) }),
         }),
         post_mask: Some(PostReadMask { stream_item_info_mask: Some(StreamItemInfoReadMask {
             include_creator_user_id: Some(true), include_classwork_sort_key: None, ..info.clone()
@@ -751,6 +754,13 @@ fn teacher_drafts_require_an_explicit_draft_status_and_exact_course() {
 }
 
 fn coursework(course_id: i64, item: classwork::StreamItem) -> Option<Coursework> {
+    let originality_enabled = match item.assignment.as_ref().and_then(|assignment| assignment.originality_settings.as_ref())
+        .and_then(|settings| settings.state)
+    {
+        Some(1) => Some(true),
+        Some(2) => Some(false),
+        _ => None,
+    };
     let (info, kind, task, question) = if let Some(assignment) = item.assignment {
         (assignment.stream_item_info?, CourseworkKind::Assignment, assignment.task_info, None)
     } else if let Some(post) = item.post {
@@ -802,6 +812,7 @@ fn coursework(course_id: i64, item: classwork::StreamItem) -> Option<Coursework>
         author_id: (kind == CourseworkKind::Announcement).then(|| info.creator_user_id.and_then(|user| user.id)).flatten(),
         question,
         question_sharing,
+        originality_enabled,
         allow_edit_after_turn_in: kind == CourseworkKind::Question
             && task.as_ref().and_then(|task| task.allow_edit_after_turn_in) == Some(true),
         topic_id: info.topic_id.into_iter()
@@ -871,17 +882,18 @@ fn material(item: classwork::Material) -> Option<Attachment> {
         Some("docs.google.com") if url.as_ref().is_some_and(|url| url.contains("/forms/")) => AttachmentKind::Form,
         Some("drive.google.com" | "docs.google.com") => AttachmentKind::DriveFile,
         _ if mime.starts_with("video/") => AttachmentKind::Video,
-        _ if mime.starts_with("application/vnd.google-apps.") || drive_sharing.is_some() => AttachmentKind::DriveFile,
+        _ if mime.starts_with("application/vnd.google-apps.") || drive_sharing.is_some()
+            || item.reference_type == Some(2) => AttachmentKind::DriveFile,
         _ if url.is_some() => AttachmentKind::Link,
         _ => AttachmentKind::Other,
     };
     let title = item.name.filter(|name| !name.trim().is_empty());
-    if title.is_none() && url.is_none() {
-        return None;
-    }
     let drive_reference = (item.reference_type == Some(2) || drive_sharing.is_some() || kind == AttachmentKind::DriveFile)
         .then(|| item.reference.filter(|value| drive_files::valid_drive_id(value))).flatten()
         .or_else(|| url.as_deref().and_then(drive_url_reference));
+    if title.is_none() && url.is_none() && drive_reference.is_none() {
+        return None;
+    }
     Some(Attachment {
         remote_id: item.id.filter(|id| *id > 0), title: title.unwrap_or_else(|| kind.label().into()), url, kind,
         drive_sharing, drive_reference,
@@ -892,12 +904,67 @@ fn material(item: classwork::Material) -> Option<Attachment> {
 pub fn drive_url_reference(url: &str) -> Option<String> {
     let host = https_host(url)?;
     let uri: tonic::codegen::http::Uri = url.parse().ok()?;
+    if host == "drive.google.com" && uri.path() == "/open" {
+        let mut ids = uri.query()?.split('&').filter_map(|entry| {
+            let (key, value) = entry.split_once('=')?;
+            (key == "id").then_some(value)
+        });
+        let id = ids.next()?;
+        return (ids.next().is_none() && drive_files::valid_drive_id(id)).then(|| id.to_owned());
+    }
     let mut parts = uri.path().split('/').skip(1);
-    let (category, marker, id) = (parts.next()?, parts.next()?, parts.next()?);
-    let known = matches!((host.as_str(), category, marker),
-        ("docs.google.com", "document" | "spreadsheets" | "presentation" | "drawings", "d")
-        | ("drive.google.com", "file", "d"));
+    let category = parts.next()?;
+    let marker = match parts.next()? {
+        "u" => {
+            let account = parts.next()?;
+            if account.is_empty() || !account.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            parts.next()?
+        }
+        marker => marker,
+    };
+    let id = parts.next()?;
+    let known = marker == "d" && match host.as_str() {
+        "docs.google.com" => matches!(category, "document" | "spreadsheets" | "presentation" | "drawings")
+            || category == "forms" && id != "e",
+        "drive.google.com" => category == "file",
+        _ => false,
+    };
     (known && drive_files::valid_drive_id(id)).then(|| id.to_owned())
+}
+
+#[cfg(test)]
+#[test]
+fn drive_file_urls_keep_the_exact_id_across_google_account_paths() {
+    for url in [
+        "https://docs.google.com/document/u/1/d/example-file/edit?resourcekey=opaque",
+        "https://drive.google.com/file/u/0/d/example-file/view",
+        "https://drive.google.com/open?resourcekey=opaque&id=example-file",
+    ] {
+        assert_eq!(drive_url_reference(url).as_deref(), Some("example-file"));
+    }
+    for url in [
+        "https://docs.google.com.invalid/document/d/example-file/edit",
+        "https://docs.google.com/document/u/student/d/example-file/edit",
+        "https://drive.google.com/open?id=example-file&id=another-file",
+        "https://drive.google.com/open?id=%65xample-file",
+        "https://docs.google.com/forms/d/e/public-published-form/viewform",
+    ] {
+        assert_eq!(drive_url_reference(url), None);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn drive_material_with_an_id_and_no_link_remains_openable_through_metadata() {
+    let file = material(classwork::Material {
+        reference_type: Some(2), reference: Some("unlinked-file".into()), ..Default::default()
+    }).unwrap();
+    assert_eq!(file.kind, AttachmentKind::DriveFile);
+    assert_eq!(file.title, "Drive file");
+    assert_eq!(file.drive_reference.as_deref(), Some("unlinked-file"));
+    assert!(file.url.is_none());
 }
 
 pub fn https_host(value: &str) -> Option<String> {
@@ -2814,6 +2881,7 @@ mod tests {
                     ..Default::default()
                 }),
                 task_info: None,
+                ..Default::default()
             }),
             ..Default::default()
         };

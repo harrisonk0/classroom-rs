@@ -413,6 +413,8 @@ pub struct Coursework {
     pub question: Option<QuestionDetails>,
     #[serde(skip)]
     pub question_sharing: Option<QuestionSharing>,
+    #[serde(skip)]
+    pub originality_enabled: Option<bool>,
     #[serde(default)]
     pub allow_edit_after_turn_in: bool,
     #[serde(default)]
@@ -712,6 +714,7 @@ impl Snapshot {
                 author_id: None,
                 question: (kind == CourseworkKind::Question).then_some(QuestionDetails::ShortAnswer),
                 question_sharing: None,
+                originality_enabled: None,
                 allow_edit_after_turn_in: false,
                 topic_id: (course_id == 1 && kind != CourseworkKind::Announcement)
                     .then(|| "demo-poetry-unit".into()),

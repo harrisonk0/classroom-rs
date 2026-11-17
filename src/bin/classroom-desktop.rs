@@ -517,6 +517,8 @@ enum Message {
     CalendarToday,
     CalendarFilter(ClassFilterOption),
     OpenAttachment(String),
+    OpenDriveFile(String),
+    DriveFileLinkLoaded(String, Result<String, String>),
     ClassFoldersLoaded(u64, Result<desktop_auth::OwnClassDetails, String>),
     ToggleTeacherDraft(i64, String),
     OpenAssignmentEditor(i64, Option<String>),
@@ -815,6 +817,8 @@ impl fmt::Debug for Message {
             Self::CalendarToday => "CalendarToday",
             Self::CalendarFilter(_) => "CalendarFilter",
             Self::OpenAttachment(_) => "OpenAttachment",
+            Self::OpenDriveFile(_) => "OpenDriveFile",
+            Self::DriveFileLinkLoaded(..) => "DriveFileLinkLoaded",
             Self::ClassFoldersLoaded(_, _) => "ClassFoldersLoaded",
             Self::ToggleTeacherDraft(..) => "ToggleTeacherDraft",
             Self::OpenAssignmentEditor(..) => "OpenAssignmentEditor",
@@ -1519,6 +1523,7 @@ struct App {
     class_code: String,
     class_creation_generation: u64,
     class_creation_allowed: bool,
+    opening_drive_file: Option<String>,
     new_class: desktop_auth::NewClass,
     invitations: Option<Vec<Course>>,
     loading_invitations: bool,
@@ -1662,6 +1667,7 @@ impl App {
             class_code: String::new(),
             class_creation_generation: 0,
             class_creation_allowed: false,
+            opening_drive_file: None,
             new_class: desktop_auth::NewClass::default(),
             invitations: None,
             loading_invitations: false,
@@ -3942,6 +3948,22 @@ impl App {
                     });
                 }
             }
+            Message::OpenDriveFile(id) if self.can_read_pages() && self.opening_drive_file.is_none() => {
+                let Some(session) = self.session.clone() else { return Task::none(); };
+                self.error = None;
+                self.opening_drive_file = Some(id.clone());
+                return Task::perform(async move {
+                    let result = desktop_auth::lookup_drive_file_link(&session, &id).await;
+                    (id, result)
+                }, |(id, result)| Message::DriveFileLinkLoaded(id, result));
+            }
+            Message::DriveFileLinkLoaded(id, result) if self.opening_drive_file.as_ref() == Some(&id) => {
+                self.opening_drive_file = None;
+                match result {
+                    Ok(url) => return self.update(Message::OpenAttachment(url)),
+                    Err(error) => self.error = Some(error),
+                }
+            }
             Message::ClassFoldersLoaded(generation, result) if generation == self.class_folders_generation => {
                 match result {
                     Ok(details) => {
@@ -4741,6 +4763,7 @@ impl App {
                                 ..template.clone()
                             });
                             item.attachments.push(template);
+                            item.originality_enabled = Some(true);
                         }
                         return schedule_capture(Shot::PersonalCopy);
                     }
@@ -4981,6 +5004,7 @@ impl App {
                 self.install_snapshot(Snapshot::demo());
                 self.reset_artwork();
                 self.session = None;
+                self.opening_drive_file = None;
                 self.class_creation_generation = self.class_creation_generation.wrapping_add(1);
                 self.class_creation_allowed = false;
                 self.new_class = desktop_auth::NewClass::default();
@@ -7173,9 +7197,12 @@ impl App {
         if !item.description.trim().is_empty() {
             details = details.push(formatted_description(&item.description, &item.description_styles, &item.description_bullets));
         }
-        for attachment in item.attachments.iter().filter(|attachment| attachment.drive_sharing != Some(DriveSharing::IndividualCopy)) {
-            let action = attachment.url.as_deref().filter(|url| trusted_attachment_host(url).is_some()
-                && !self.verify_live_course_count).map(|url| Message::OpenAttachment(url.to_owned()));
+        for attachment in &item.attachments {
+            let action = if attachment.drive_sharing == Some(DriveSharing::IndividualCopy) {
+                Some(Message::OpenItem(item.course_id, item.id.clone()))
+            } else {
+                self.attachment_action(attachment)
+            };
             details = details.push(button(row![
                 icon(Icon::Book, BLUE, 16),
                 text(&attachment.title).size(14).color(FG).width(Fill),
@@ -7185,6 +7212,23 @@ impl App {
         }
         container(column![row, container(details).padding([3, 14]).width(Fill)].spacing(4))
             .width(Fill).padding(Padding { bottom: 11.0, ..Padding::ZERO }).style(|_| outline_surface(9.0)).into()
+    }
+
+    fn attachment_action(&self, attachment: &desktop_data::Attachment) -> Option<Message> {
+        if self.verify_live_course_count {
+            return None;
+        }
+        let url = attachment.url.as_deref().filter(|url| trusted_attachment_host(url).is_some());
+        if let Some(id) = attachment.drive_reference.as_deref()
+            && attachment.kind == desktop_data::AttachmentKind::DriveFile
+        {
+            if let Some(url) = url.filter(|url| desktop_auth::drive_url_reference(url).as_deref() == Some(id)) {
+                return Some(Message::OpenAttachment(url.to_owned()));
+            }
+            return (self.can_read_pages() && self.opening_drive_file.is_none())
+                .then(|| Message::OpenDriveFile(id.to_owned()));
+        }
+        url.map(|url| Message::OpenAttachment(url.to_owned()))
     }
 
     fn apply_teacher_topics(&mut self, course: i64, topics: Vec<desktop_data::Topic>, removed: Option<&str>) {
@@ -8600,9 +8644,7 @@ impl App {
                         attachment.title.clone()
                     };
                     let open = button(text(label)).padding([8, 10]).style(outline_style)
-                        .on_press_maybe(attachment.url.as_ref()
-                            .filter(|url| !self.verify_live_course_count && trusted_attachment_host(url).is_some())
-                            .map(|url| Message::OpenAttachment(url.clone())));
+                        .on_press_maybe(self.attachment_action(attachment));
                     let mut line = row![open].spacing(7).align_y(Alignment::Center);
                     if let (Some(material), Ok(item_id)) = (attachment.remote_id, item.id.parse::<i64>())
                         && self.can_compose_comment(course_id, item_id)
@@ -8735,6 +8777,14 @@ impl App {
                 }
             }
             if let Ok(item_id) = item.id.parse::<i64>() {
+                if item.kind == CourseworkKind::Assignment
+                    && (self.can_read_pages() && self.class_roles.get(&course_id) == Some(&CourseRole::Student)
+                        || self.screenshot_directory.is_some())
+                    && let Some(url) = desktop_auth::originality_report_url(course_id, item_id, item.originality_enabled == Some(true))
+                {
+                    work = work.push(button("Open originality reports in Classroom").padding([8, 12])
+                        .style(outline_style).on_press(Message::OpenAttachment(url)));
+                }
                 let picker = self.drive_picker.as_ref().filter(|picker| picker.course == course_id && picker.item == Some(item_id));
                 let ready = self.can_add_submission_drive_file(course_id, item_id) && !self.has_pending_request();
                 #[cfg(target_os = "macos")]
@@ -8817,23 +8867,26 @@ impl App {
             let mut attachments = column![text("Attachments").size(17).font(medium()).color(FG)].spacing(8);
             for attachment in &item.attachments {
                 let template = attachment.drive_sharing == Some(DriveSharing::IndividualCopy);
-                let url = if template {
-                    personal_copy_url(item, attachment)
+                let file = if template {
+                    matching_personal_copy(item, attachment)
                 } else {
-                    attachment.url.as_deref()
+                    Some(attachment)
                 };
-                let link = url.and_then(|url| {
-                    trusted_attachment_host(url).map(|host| (url, host))
-                });
-                let description = match (attachment.drive_sharing, link) {
-                    (Some(DriveSharing::IndividualCopy), Some(_)) => "Opens your personal copy".to_owned(),
-                    (Some(DriveSharing::IndividualCopy), None) if !self.submissions_checked.contains(&course_id)
+                let action = file.and_then(|file| self.attachment_action(file));
+                let opening = file.and_then(|file| file.drive_reference.as_ref())
+                    .is_some_and(|id| self.opening_drive_file.as_ref() == Some(id));
+                let host = file.and_then(|file| file.url.as_deref()).and_then(trusted_attachment_host);
+                let description = match (attachment.drive_sharing, action.is_some(), opening) {
+                    (_, _, true) => "Opening in Drive…".to_owned(),
+                    (Some(DriveSharing::IndividualCopy), true, _) => "Opens your personal copy".to_owned(),
+                    (Some(DriveSharing::IndividualCopy), false, _) if !self.submissions_checked.contains(&course_id)
                         && self.can_read_pages() && !self.page_errors.contains_key(&PageRead::Detail(DetailRead::Submissions(course_id))) =>
                         "Checking for your personal copy…".to_owned(),
-                    (Some(DriveSharing::IndividualCopy), None) => "Personal copy unavailable".to_owned(),
-                    (Some(sharing), _) => format!("{} · {}", attachment.kind.label(), sharing.label()),
-                    (None, Some((_, host))) => format!("{} · {host}", attachment.kind.label()),
-                    (None, None) => format!("{} · no secure link", attachment.kind.label()),
+                    (Some(DriveSharing::IndividualCopy), false, _) => "Personal copy unavailable".to_owned(),
+                    (Some(sharing), _, _) => format!("{} · {}", attachment.kind.label(), sharing.label()),
+                    (None, true, _) => host.map_or_else(|| attachment.kind.label().to_owned(), |host|
+                        format!("{} · {host}", attachment.kind.label())),
+                    (None, false, _) => format!("{} · no secure link", attachment.kind.label()),
                 };
                 let content = row![
                     icon(Icon::Book, ACTIVE_FG, 20),
@@ -8842,10 +8895,7 @@ impl App {
                     icon(Icon::Arrow, MUTED, 16),
                 ].spacing(12).align_y(Alignment::Center);
                 attachments = attachments.push(button(content).width(Fill).padding(13)
-                    .style(outline_style).on_press_maybe(
-                        link.filter(|_| !self.verify_live_course_count)
-                            .map(|(url, _)| Message::OpenAttachment(url.to_owned())),
-                    ));
+                    .style(outline_style).on_press_maybe(action));
             }
             body = body.push(attachments);
         }
@@ -9647,15 +9697,13 @@ fn trusted_attachment_host(url: &str) -> Option<&str> {
         .then_some(host)
 }
 
-fn personal_copy_url<'a>(item: &'a Coursework, template: &desktop_data::Attachment) -> Option<&'a str> {
+fn matching_personal_copy<'a>(item: &'a Coursework, template: &desktop_data::Attachment) -> Option<&'a desktop_data::Attachment> {
     let mut matches = item.submission.as_ref()?.attachments.iter().filter(|file| file.is_personal_copy_of(template));
     let copy = matches.next()?;
     if matches.next().is_some() {
         return None;
     }
-    let url = copy.url.as_deref()?;
-    (desktop_auth::drive_url_reference(url).as_deref() == copy.drive_reference.as_deref()
-        && copy.drive_reference.is_some()).then_some(url)
+    (copy.kind == desktop_data::AttachmentKind::DriveFile).then_some(copy)
 }
 
 fn valid_host_label(label: &str) -> bool {
@@ -9922,7 +9970,8 @@ mod tests {
 
     #[test]
     fn a_personal_template_only_opens_an_exact_current_submission_copy() {
-        let (_, snapshot) = fixture();
+        let (mut app, snapshot) = fixture();
+        app.verify_live_course_count = false;
         let mut item = snapshot.coursework_for(1).unwrap().iter()
             .find(|item| item.kind == CourseworkKind::Assignment).unwrap().clone();
         let template = desktop_data::Attachment {
@@ -9936,11 +9985,18 @@ mod tests {
             drive_reference: Some("mine".into()), drive_parent_reference: Some("source".into()),
             drive_sharing: None, ..template.clone()
         };
-        assert_eq!(personal_copy_url(&item, &template), None);
+        assert_eq!(matching_personal_copy(&item, &template), None);
         item.submission = Some(Submission { attachments: vec![mine.clone()], ..Default::default() });
-        assert_eq!(personal_copy_url(&item, &template), mine.url.as_deref());
+        assert!(matches!(
+            matching_personal_copy(&item, &template).and_then(|copy| app.attachment_action(copy)),
+            Some(Message::OpenAttachment(url)) if Some(&url) == mine.url.as_ref()
+        ));
         item.submission.as_mut().unwrap().attachments[0].url = template.url.clone();
-        assert_eq!(personal_copy_url(&item, &template), None);
+        let copy = matching_personal_copy(&item, &template).unwrap();
+        assert_eq!(copy.drive_reference.as_deref(), Some("mine"));
+        assert!(app.attachment_action(copy).is_none());
+        item.submission.as_mut().unwrap().attachments.push(mine);
+        assert_eq!(matching_personal_copy(&item, &template), None);
     }
 
     #[cfg(target_os = "macos")]

@@ -164,6 +164,7 @@ mod tests {
             author_id: None,
             question: None,
             question_sharing: None,
+            originality_enabled: None,
             allow_edit_after_turn_in: false,
             topic_id: topic.map(str::to_owned),
             classwork_sort_key: key.map(<[u8]>::to_vec),

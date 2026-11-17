@@ -1,4 +1,4 @@
-"""Upload one explicitly chosen file to Drive using a resumable session."""
+"""Read Drive metadata and upload explicitly chosen files."""
 
 import json
 import mimetypes
@@ -110,15 +110,35 @@ def list_files(bearer, search, page_token, parent=None, shared_only=False):
         return response.json()
 
 
+def get_file_link(bearer, file_id):
+    if not isinstance(file_id, str) or not FILE_ID.fullmatch(file_id):
+        raise UploadError("Invalid Drive file ID.")
+    with requests.Session() as session:
+        session.trust_env = False
+        session.headers["Authorization"] = f"Bearer {bearer}"
+        response = session.get(
+            f"{FILES_ENDPOINT}/{file_id}",
+            params={"fields": "id,webViewLink,trashed", "supportsAllDrives": "true"},
+            allow_redirects=False,
+            timeout=(10, 20),
+        )
+        if response.status_code != 200:
+            raise UploadError(f"Drive could not open the file (HTTP {response.status_code}).")
+        return response.json()
+
+
 def main():
     if sys.stdin.isatty() or sys.stdout.isatty():
         return 2
     listing = sys.argv[1:] == ["--list"]
+    lookup = sys.argv[1:] == ["--file-link"]
     try:
         request = json.loads(sys.stdin.readline(65536))
         if listing:
             result = list_files(request["bearer"], request["search"], request["page_token"],
                                 request.get("parent"), request.get("shared_only", False))
+        elif lookup:
+            result = get_file_link(request["bearer"], request["file_id"])
         else:
             result = upload(Path(request["path"]), request["bearer"])
     except UploadError as error:
@@ -126,7 +146,12 @@ def main():
         return 1
     except Exception:
         # Avoid exposing the bearer, path, or upload session URL in exceptions.
-        message = "Drive could not list files." if listing else "Drive upload failed. Check Drive before trying again."
+        if lookup:
+            message = "Drive could not open the file."
+        elif listing:
+            message = "Drive could not list files."
+        else:
+            message = "Drive upload failed. Check Drive before trying again."
         print(json.dumps({"error": message}), flush=True)
         return 1
     print(json.dumps(result), flush=True)

@@ -16,6 +16,50 @@ async fn main() {
         println!("Account can create classes={allowed}");
         return;
     }
+    if std::env::args().nth(1).as_deref() == Some("--personal-copy-access") {
+        let courses = session.snapshot.courses.iter().filter(|course| course.state == CourseState::Archived)
+            .map(|course| course.id).collect();
+        let session = std::sync::Arc::new(session);
+        let mut updates = Box::pin(auth::assignment_updates(session.clone(), courses));
+        while let Some(update) = updates.next().await {
+            let (Some(contents), Some(submissions)) = (update.contents, update.submissions) else { continue };
+            for item in contents.items {
+                let Some(own) = submissions.iter().find(|(id, _)| id == &item.id).map(|(_, data)| data) else { continue };
+                for template in &item.attachments {
+                    let mut copies = own.attachments.iter().filter(|copy| copy.is_personal_copy_of(template));
+                    let Some(id) = copies.next().and_then(|copy| copy.drive_reference.as_deref()) else { continue };
+                    if copies.next().is_some() { continue; }
+                    let url = auth::lookup_drive_file_link(&session, id).await.expect("Read one exact personal-copy Drive link");
+                    assert_eq!(auth::drive_url_reference(&url).as_deref(), Some(id));
+                    println!("Drive returned a browser link for an existing, exact personal copy");
+                    return;
+                }
+            }
+        }
+        panic!("No existing personal copy was eligible for a metadata check");
+    }
+    if std::env::args().nth(1).as_deref() == Some("--originality-settings") {
+        use classroom_rust::desktop_data::CourseworkKind;
+        let courses = session.snapshot.courses.iter().filter(|course| course.state == CourseState::Active)
+            .map(|course| course.id).collect::<Vec<_>>();
+        let reads = iced::futures::stream::iter(courses.iter().copied()).map(|course| {
+            let session = &session;
+            async move { auth::load_coursework(session, course).await }
+        }).buffer_unordered(3).collect::<Vec<_>>().await;
+        let mut counts = [0, 0, 0];
+        for read in reads {
+            for item in read.expect("Read published assignment settings").items.into_iter()
+                .filter(|item| item.kind == CourseworkKind::Assignment)
+            {
+                let index = match item.originality_enabled { Some(true) => 0, Some(false) => 1, None => 2 };
+                counts[index] += 1;
+                assert_eq!(auth::originality_report_url(item.course_id, item.id.parse().unwrap(), index == 0).is_some(), index == 0);
+            }
+        }
+        println!("Active classes={}; assignment originality enabled={}; disabled={}; omitted={}",
+            courses.len(), counts[0], counts[1], counts[2]);
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--classwork-order-check") {
         let mut args = std::env::args().skip(2);
         let course: i64 = args.next().expect("Pass a course ID and exact titles in visible order")

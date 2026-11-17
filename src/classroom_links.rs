@@ -36,6 +36,7 @@ impl ClassroomLink {
                 course: link_id(course)?,
                 classwork: path[0] == "w",
             }),
+            ["w", course, "t", "all"] => Some(Self::Course { course: link_id(course)?, classwork: true }),
             ["c", course, kind, item, "details" | "dw"] => Some(Self::Item {
                 course: link_id(course)?,
                 item: link_id(item)?,
@@ -90,7 +91,13 @@ fn link_id(value: &str) -> Option<i64> {
             return None;
         }
         let bytes = URL_SAFE_NO_PAD.decode(value).ok()?;
-        decimal(std::str::from_utf8(&bytes).ok()?)
+        let decoded = std::str::from_utf8(&bytes).ok()?;
+        let numeric = decoded.trim_end_matches('Z');
+        let padding = decoded.len() - numeric.len();
+        if padding > 0 && (padding > 2 || decoded.len() % 3 != 0) {
+            return None;
+        }
+        decimal(numeric)
     })
 }
 
@@ -102,6 +109,10 @@ mod tests {
     fn parses_course_classwork_and_all_observed_assignment_routes() {
         assert_eq!(ClassroomLink::parse("https://classroom.google.com/u/1/w/MTIz"),
             Some(ClassroomLink::Course { course: 123, classwork: true }));
+        assert_eq!(ClassroomLink::parse("https://classroom.google.com/u/1/w/MTIz/t/all"),
+            Some(ClassroomLink::Course { course: 123, classwork: true }));
+        assert_eq!(ClassroomLink::parse("https://classroom.google.com/c/MVpa/a/NDVa/dw"),
+            Some(ClassroomLink::Item { course: 1, item: 45, kind: ItemLinkKind::Assignment }));
         for kind in [ItemLinkKind::Assignment, ItemLinkKind::ShortAnswer, ItemLinkKind::MultipleChoice] {
             let target = ClassroomLink::Item { course: 123, item: 456, kind };
             let url = target.web_url().unwrap();
@@ -120,6 +131,8 @@ mod tests {
             "https://classroom.google.com/c/123/a/456/submissions",
             "https://classroom.google.com/c/0",
             "https://classroom.google.com/c/123/a/%34%35%36/details",
+            "https://classroom.google.com/c/ MVo=",
+            "https://classroom.google.com/c/MTIzWlpa",
         ] {
             assert!(ClassroomLink::parse(value).is_none(), "{value}");
         }

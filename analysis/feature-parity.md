@@ -313,3 +313,9 @@ For teachers, ReorderClasswork sends the exact topic and moved item, plus the pr
 ### Create a class
 
 CreateCourse uses the CoursesService route with Course and CourseReadMask at request tags 1 and 2. Dart type arguments at `0x18045c8` identify the direct Course reply. The input carries the current user as owner and the title, plus the supplied section, room and custom subject. The desktop requires the signed-in user's class-creation permission and checks the returned ID, owner and details in a separate read before opening the class. Offline fixtures cover permission matching, encoding and confirmed state.
+
+### Student attachment links and originality reports
+
+A personal copy is eligible to open only when the signed-in student's submission contains one distinct Drive item whose parent reference matches the exact template. A Classroom-supplied URL must resolve to that item's ID. Otherwise the app reads `files.get` metadata for that ID and requires an exact, untrashed reply with a matching Google editor or viewer URL. The app preserves the returned URL, including resource keys. See [Drive file metadata](https://developers.google.com/workspace/drive/api/reference/rest/v3/files) and [Classroom's personal document workflow](https://support.google.com/edu/classroom/answer/9073815).
+
+Android registers Assignment.originalitySettings and its read mask at tag 5. OriginalitySettings.state and the includeState flag are tag 1. At `0x187c928`, the app only attaches the Your work action for ENABLED state 1. The action builds `/c/<course>/a/<item>/dw` at `0x1876ff8` and opens it in the browser at `0x1ea5314`. The Classroom URL encoder `0x17d983c` pads decimal IDs with Z before base64 encoding. The desktop follows this path and also accepts those padded links when pasted. Google hosts the report viewer and Run button on the assignment page. [Classroom originality reports](https://support.google.com/edu/classroom/answer/9335819)

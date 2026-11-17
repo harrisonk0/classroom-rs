@@ -1,4 +1,4 @@
-use super::{DriveFileAttachment, LiveSession, run_drive_helper};
+use super::{DriveFileAttachment, LiveSession, drive_url_reference, run_drive_helper};
 use serde::Deserialize;
 use std::{collections::BTreeSet, time::Duration};
 use zeroize::Zeroizing;
@@ -93,10 +93,55 @@ pub async fn list_drive_files(
         .await.map(decode_page)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveFileLink {
+    id: String,
+    web_view_link: Option<String>,
+    #[serde(default)]
+    trashed: bool,
+}
+
+fn confirmed_file_link(reply: DriveFileLink, expected: &str) -> Result<String, String> {
+    if reply.id == expected && !reply.trashed {
+        if let Some(url) = reply.web_view_link
+            && drive_url_reference(&url).as_deref() == Some(expected)
+        {
+            return Ok(url);
+        }
+    }
+    Err("Drive did not return a supported link for this file.".into())
+}
+
+pub async fn lookup_drive_file_link(session: &LiveSession, file_id: &str) -> Result<String, String> {
+    if !valid_drive_id(file_id) {
+        return Err("Invalid Drive file ID.".into());
+    }
+    let bearer = session.bearer_for_request(None).await?;
+    let payload = Zeroizing::new(serde_json::to_vec(&serde_json::json!({
+        "file_id": file_id,
+        "bearer": bearer.as_str(),
+    })).map_err(|_| "Could not prepare the file request.")?);
+    let reply = run_drive_helper(&["--file-link"], payload, Duration::from_secs(35), "Drive did not finish opening the file.").await?;
+    confirmed_file_link(reply, file_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::desktop_auth::{classwork, material_matches};
+
+    #[test]
+    fn file_link_must_belong_to_the_requested_untrashed_file() {
+        let link = "https://drive.google.com/open?id=exact-file&resourcekey=opaque";
+        let reply = |id: &str, url: &str, trashed| DriveFileLink {
+            id: id.into(), web_view_link: Some(url.into()), trashed,
+        };
+        assert_eq!(confirmed_file_link(reply("exact-file", link, false), "exact-file"), Ok(link.into()));
+        assert!(confirmed_file_link(reply("different-file", link, false), "exact-file").is_err());
+        assert!(confirmed_file_link(reply("exact-file", link, true), "exact-file").is_err());
+        assert!(confirmed_file_link(reply("exact-file", "https://drive.google.com/file/d/different-file/view", false), "exact-file").is_err());
+    }
 
     #[test]
     fn list_metadata_preserves_page_and_marks_existing_items_as_not_uploaded() {

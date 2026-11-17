@@ -201,6 +201,7 @@ fn assignment_text_item(course: i64, id: Option<i64>, title: Option<&str>, descr
                 ..Default::default()
             }),
             task_info: None,
+            ..Default::default()
         }),
         ..Default::default()
     }
@@ -221,6 +222,7 @@ fn assignment_response_mask() -> classwork::StreamReadMask {
                 include_due_date: Some(true), include_user_specified_due_time: Some(true),
                 include_grade_denominator: Some(true), ..Default::default()
             }),
+            ..Default::default()
         }),
         ..Default::default()
     }
@@ -244,6 +246,7 @@ fn publication_update(course: i64, id: i64, action: AssignmentPublication) -> mu
                 ..Default::default()
             }),
             task_info: None,
+            ..Default::default()
         }),
         ..Default::default()
     };
