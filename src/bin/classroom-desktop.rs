@@ -261,6 +261,7 @@ impl fmt::Display for ClassFilterOption {
 enum DetailRead {
     Roster(i64),
     Submissions(i64),
+    PersonalCopy(i64, i64),
     Comments(i64, i64),
     PrivateFeedback(i64, i64),
     Rubric(i64, i64),
@@ -303,6 +304,7 @@ impl PageRead {
 enum DetailData {
     Roster(Vec<CourseMember>),
     Submissions(Vec<(String, Submission)>),
+    PersonalCopy(String, bool),
     Comments(Vec<Comment>),
     PrivateFeedback(Vec<Comment>),
     Rubric(Option<Rubric>),
@@ -467,6 +469,10 @@ enum Message {
     ChooseSubmissionFile(i64, i64),
     SubmissionFileChosen(i64, i64, Result<Option<PathBuf>, String>),
     CancelSubmissionFile,
+    ConfirmPersonalCopy(i64, i64, String),
+    CancelPersonalCopy,
+    PreparePersonalCopy(i64, i64, String),
+    PersonalCopyPrepared(i64, i64, Result<desktop_auth::PersonalCopyPreparation, String>),
     ConfirmRemoveMaterial(i64, i64, i64),
     CancelRemoveMaterial,
     RemoveMaterial(i64, i64, i64),
@@ -771,6 +777,10 @@ impl fmt::Debug for Message {
             Self::ChooseSubmissionFile(..) => "ChooseSubmissionFile",
             Self::SubmissionFileChosen(..) => "SubmissionFileChosen",
             Self::CancelSubmissionFile => "CancelSubmissionFile",
+            Self::ConfirmPersonalCopy(..) => "ConfirmPersonalCopy",
+            Self::CancelPersonalCopy => "CancelPersonalCopy",
+            Self::PreparePersonalCopy(..) => "PreparePersonalCopy",
+            Self::PersonalCopyPrepared(..) => "PersonalCopyPrepared",
             Self::ConfirmRemoveMaterial(..) => "ConfirmRemoveMaterial",
             Self::CancelRemoveMaterial => "CancelRemoveMaterial",
             Self::RemoveMaterial(..) => "RemoveMaterial",
@@ -1577,6 +1587,10 @@ struct App {
     deleting_comment: Option<CommentTarget>,
     private_unconfirmed: BTreeSet<(i64, i64)>,
     pending_remove_material: Option<(i64, i64, i64)>,
+    personal_copy_checks: BTreeMap<(i64, i64), (String, bool)>,
+    pending_personal_copy: Option<(i64, i64, String)>,
+    personal_copy_generation: u64,
+    personal_copy_loading_generation: Option<u64>,
     submissions_checked: BTreeSet<i64>,
     selected_topic: Option<String>,
     classwork_toggles: BTreeSet<String>,
@@ -1723,6 +1737,10 @@ impl App {
             deleting_comment: None,
             private_unconfirmed: BTreeSet::new(),
             pending_remove_material: None,
+            personal_copy_checks: BTreeMap::new(),
+            pending_personal_copy: None,
+            personal_copy_generation: 0,
+            personal_copy_loading_generation: None,
             submissions_checked: BTreeSet::new(),
             selected_topic: None,
             classwork_toggles: BTreeSet::new(),
@@ -1953,6 +1971,7 @@ impl App {
                     self.screen = screen;
                     self.confirming_unenroll = None;
                     self.confirming_question_answer = None;
+                    self.pending_personal_copy = None;
                     if screen != Screen::Join {
                         self.class_code.clear();
                     }
@@ -2604,6 +2623,8 @@ impl App {
                 self.busy = false;
                 match result {
                     Ok(()) => {
+                        self.reset_personal_copy();
+                        self.submissions_checked.clear();
                         self.page_errors.clear();
                         self.reset_notifications();
                         self.reset_stream_access();
@@ -3100,6 +3121,11 @@ impl App {
                 }
                 match result {
                     Ok(contents) => {
+                        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+                        self.personal_copy_checks.retain(|(course, _), _| *course != id);
+                        if self.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
+                            self.pending_personal_copy = None;
+                        }
                         self.gradebooks.remove(&id);
                         if let Some(snapshot) = &mut self.snapshot {
                             if self.screen == Screen::Course(id)
@@ -3136,6 +3162,13 @@ impl App {
                             .filter_map(|member| member.id.parse::<i64>().ok()).collect(),
                         _ => Vec::new(),
                     };
+                    let personal_template = match request {
+                        DetailRead::PersonalCopy(course, item) => self.personal_copy_candidate(course, item),
+                        _ => None,
+                    };
+                    if matches!(request, DetailRead::PersonalCopy(..)) {
+                        self.personal_copy_loading_generation = Some(self.personal_copy_generation);
+                    }
                     self.loading_detail = Some(request);
                     self.page_errors.remove(&PageRead::Detail(request));
                     return Task::perform(async move {
@@ -3144,6 +3177,11 @@ impl App {
                                 .map(DetailData::Roster),
                             DetailRead::Submissions(course) => desktop_auth::load_submissions(&session, course).await
                                 .map(DetailData::Submissions),
+                            DetailRead::PersonalCopy(course, item) => match personal_template {
+                                Some(reference) => desktop_auth::check_personal_copy_absent(&session, course, item, reference.clone()).await
+                                    .map(|absent| DetailData::PersonalCopy(reference, absent)),
+                                None => Err("Personal-copy details changed. Refresh the assignment.".into()),
+                            },
                             DetailRead::Comments(course, item) => desktop_auth::load_comments(&session, course, item).await
                                 .map(DetailData::Comments),
                             DetailRead::PrivateFeedback(course, item) =>
@@ -3172,11 +3210,18 @@ impl App {
             }
             Message::DetailLoaded(request, result) => {
                 self.loading_detail = None;
+                if matches!(request, DetailRead::PersonalCopy(..))
+                    && self.personal_copy_loading_generation.take() != Some(self.personal_copy_generation)
+                {
+                    self.queued_page_load = true;
+                    return self.dequeue_page_load().map_or_else(Task::none, |read| self.update(read));
+                }
                 if std::env::var_os("CLASSROOM_READ_ONLY_DIAGNOSTICS").is_some() {
                     let section = match request {
                         DetailRead::Roster(_) => "People",
                         DetailRead::Submissions(_) => "Your work",
                         DetailRead::Comments(..) => "Class comments",
+                        DetailRead::PersonalCopy(..) => "Personal copy",
                         DetailRead::PrivateFeedback(..) => "Private feedback",
                         DetailRead::Rubric(..) => "Rubric",
                         DetailRead::OverallGrade(_) => "Overall grade",
@@ -3205,10 +3250,18 @@ impl App {
                         self.queued_page_load |= self.screen == Screen::Course(course) && self.tab == Tab::People;
                     }
                     (DetailRead::Submissions(course), Ok(DetailData::Submissions(submissions))) => {
+                        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+                        if self.pending_personal_copy.as_ref().is_some_and(|(id, _, _)| *id == course) {
+                            self.pending_personal_copy = None;
+                        }
+                        self.personal_copy_checks.retain(|(id, _), _| *id != course);
                         if let Some(snapshot) = &mut self.snapshot {
                             snapshot.set_submissions(course, submissions);
                             self.submissions_checked.insert(course);
                         }
+                    }
+                    (DetailRead::PersonalCopy(course, item), Ok(DetailData::PersonalCopy(reference, absent))) => {
+                        self.personal_copy_checks.insert((course, item), (reference, absent));
                     }
                     (DetailRead::PrivateFeedback(course, item), Ok(DetailData::PrivateFeedback(comments))) => {
                         self.private_feedback.insert((course, item), comments);
@@ -3765,6 +3818,39 @@ impl App {
                     Err(error) => self.error = Some(error),
                 }
             }
+            Message::ConfirmPersonalCopy(course, item, reference)
+                if !self.has_pending_request() && self.personal_copy_ready(course, item, &reference) =>
+            {
+                self.pending_personal_copy = Some((course, item, reference));
+            }
+            Message::CancelPersonalCopy => self.pending_personal_copy = None,
+            Message::PreparePersonalCopy(course, item, reference)
+                if !self.has_pending_request() && self.pending_personal_copy.as_ref() == Some(&(course, item, reference.clone()))
+                    && self.personal_copy_ready(course, item, &reference) =>
+            {
+                let Some(session) = self.session.clone() else { return Task::none(); };
+                self.pending_personal_copy = None;
+                self.personal_copy_checks.remove(&(course, item));
+                self.sending_submission = true;
+                self.error = None;
+                self.notice = None;
+                return Task::perform(async move {
+                    desktop_auth::prepare_personal_copy(&session, course, item, reference).await
+                }, move |result| Message::PersonalCopyPrepared(course, item, result));
+            }
+            Message::PersonalCopyPrepared(course, item, result) => {
+                self.sending_submission = false;
+                self.personal_copy_checks.remove(&(course, item));
+                self.submissions_checked.remove(&course);
+                let refresh = self.update(Message::LoadDetail(DetailRead::Submissions(course)));
+                match result {
+                    Ok(desktop_auth::PersonalCopyPreparation::Available(_)) => self.notice = Some("Your work is ready.".into()),
+                    Ok(desktop_auth::PersonalCopyPreparation::PreparedWithoutCopy) => self.notice = Some("Your work is ready, but Classroom did not return a personal copy. Ask your teacher about the attachment.".into()),
+                    Ok(desktop_auth::PersonalCopyPreparation::ExistingSubmissionWithoutCopy) => self.notice = Some("Your submission already exists. Ask your teacher about the missing attachment.".into()),
+                    Err(error) => self.error = Some(error),
+                }
+                return refresh;
+            }
             Message::ConfirmRemoveMaterial(course, item, material)
                 if !self.has_pending_request() && self.can_compose_comment(course, item) =>
             {
@@ -3921,6 +4007,8 @@ impl App {
                 self.attachment_link.clear();
                 self.submission_file = None;
                 self.pending_remove_material = None;
+                self.pending_personal_copy = None;
+                self.personal_copy_checks.retain(|(id, _), _| *id != course);
                 self.pending_submission = None;
                 self.item_id = Some(item);
                 self.previous_screen = Some(self.screen);
@@ -3941,6 +4029,7 @@ impl App {
                 self.attachment_link.clear();
                 self.submission_file = None;
                 self.pending_remove_material = None;
+                self.pending_personal_copy = None;
                 self.pending_submission = None;
                 self.screen = self.previous_screen.take().unwrap_or(Screen::Home);
                 self.item_id = None;
@@ -5094,6 +5183,7 @@ impl App {
                 self.reset_artwork();
                 self.session = None;
                 self.snapshot = None;
+                self.reset_personal_copy();
                 self.classroom_link_input = None;
                 self.show_hidden_classes = false;
                 self.open_course_menu = None;
@@ -5171,6 +5261,11 @@ impl App {
         }
 
         if let Some(mut contents) = result.contents {
+            self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+            self.personal_copy_checks.retain(|(course, _), _| *course != id);
+            if self.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
+                self.pending_personal_copy = None;
+            }
             if let Some(previous) = snapshot.coursework_for(id) {
                 for item in &mut contents.items {
                     if let Some(old) = previous.iter().find(|old| old.id == item.id) {
@@ -5232,6 +5327,24 @@ impl App {
             snapshot.source == SnapshotSource::Live && snapshot.courses.iter()
                 .any(|entry| entry.id == course && entry.state == CourseState::Active)
         })
+    }
+
+    fn personal_copy_candidate(&self, course: i64, item: i64) -> Option<String> {
+        if !self.can_compose_comment(course, item)
+            || self.class_roles.get(&course) != Some(&CourseRole::Student)
+            || !self.submissions_checked.contains(&course)
+            || self.page_errors.contains_key(&PageRead::Detail(DetailRead::Submissions(course)))
+        {
+            return None;
+        }
+        let work = self.snapshot.as_ref()?.coursework_for(course)?.iter()
+            .find(|entry| entry.id.parse::<i64>().ok() == Some(item))?;
+        eligible_personal_copy_template(work)
+    }
+
+    fn personal_copy_ready(&self, course: i64, item: i64, reference: &str) -> bool {
+        self.personal_copy_checks.get(&(course, item)).is_some_and(|(checked, absent)| *absent && checked == reference)
+            && self.personal_copy_candidate(course, item).as_deref() == Some(reference)
     }
 
     fn can_compose_class_comment(&self, course: i64, item: i64) -> bool {
@@ -5326,7 +5439,8 @@ impl App {
                     id == course && self.tab == Tab::ClassSettings,
                 (PageRead::Detail(DetailRead::Submissions(course)), Screen::Item(id)) => id == course,
                 (PageRead::Detail(DetailRead::Comments(course, key) | DetailRead::PrivateFeedback(course, key)
-                    | DetailRead::Rubric(course, key) | DetailRead::TeacherSubmissions(course, key)), Screen::Item(id)) =>
+                    | DetailRead::Rubric(course, key) | DetailRead::PersonalCopy(course, key)
+                    | DetailRead::TeacherSubmissions(course, key)), Screen::Item(id)) =>
                     id == course && item == Some(key),
                 (PageRead::Detail(DetailRead::TeacherFeedback(key)), Screen::Item(id)) =>
                     id == key.course && item == Some(key.item),
@@ -5427,6 +5541,10 @@ impl App {
                         && !self.stream_access.contains_key(&course) && !self.loading_stream_access.contains(&course), PageRead::StreamAccess(course)),
                     (item.comments.is_none() || self.comment_unconfirmed.contains(&(course, item_id)), comments),
                     (!teacher && has_submission(item) && !self.submissions_checked.contains(&course), submissions),
+                    (self.personal_copy_candidate(course, item_id).is_some()
+                        && self.personal_copy_checks.get(&(course, item_id)).is_none_or(|(reference, _)|
+                            self.personal_copy_candidate(course, item_id).as_ref() != Some(reference)),
+                        PageRead::Detail(DetailRead::PersonalCopy(course, item_id))),
                     (item.kind == CourseworkKind::Assignment && !self.rubrics.contains_key(&(course, item_id)), rubric),
                     (!teacher && snapshot.source == SnapshotSource::Live
                         && item.submission.as_ref().is_some_and(|sub| sub.remote_id.is_some())
@@ -5590,7 +5708,14 @@ impl App {
         self.notice = result.is_ok().then(|| success.to_owned());
     }
 
+    fn reset_personal_copy(&mut self) {
+        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
+        self.personal_copy_checks.clear();
+        self.pending_personal_copy = None;
+    }
+
     fn install_snapshot(&mut self, snapshot: Snapshot) {
+        self.reset_personal_copy();
         self.teachers_generation = self.teachers_generation.wrapping_add(1);
         self.class_teachers.clear();
         self.reset_notifications();
@@ -8976,6 +9101,33 @@ impl App {
                 ].spacing(12).align_y(Alignment::Center);
                 attachments = attachments.push(button(content).width(Fill).padding(13)
                     .style(outline_style).on_press_maybe(action));
+                if let (Ok(item_id), Some(reference)) = (item.id.parse::<i64>(), attachment.drive_reference.as_ref())
+                    && self.personal_copy_ready(course_id, item_id, reference)
+                {
+                    if self.pending_personal_copy.as_ref() == Some(&(course_id, item_id, reference.clone())) {
+                        attachments = attachments.push(text("Prepare your work for this assignment?").size(14))
+                            .push(row![
+                                button("Cancel").style(quiet_style).padding([7, 10]).on_press(Message::CancelPersonalCopy),
+                                button("Prepare").style(primary_style).padding([7, 10])
+                                    .on_press_maybe((!self.has_pending_request()).then(||
+                                        Message::PreparePersonalCopy(course_id, item_id, reference.clone()))),
+                            ].spacing(8));
+                    } else {
+                        attachments = attachments.push(button("Prepare personal copy…").style(outline_style).padding([7, 10])
+                            .on_press_maybe((!self.has_pending_request()).then(||
+                                Message::ConfirmPersonalCopy(course_id, item_id, reference.clone()))));
+                    }
+                }
+
+            }
+            if let Ok(item_id) = item.id.parse::<i64>()
+                && self.personal_copy_candidate(course_id, item_id).is_some()
+                && let Some(status) = self.page_read_status(
+                    PageRead::Detail(DetailRead::PersonalCopy(course_id, item_id)),
+                    self.personal_copy_checks.contains_key(&(course_id, item_id)), "Checking personal-copy availability…",
+                )
+            {
+                attachments = attachments.push(status);
             }
             body = body.push(attachments);
         }
@@ -9810,6 +9962,18 @@ fn trusted_attachment_host(url: &str) -> Option<&str> {
         .then_some(host)
 }
 
+fn eligible_personal_copy_template(work: &Coursework) -> Option<String> {
+    if work.kind != CourseworkKind::Assignment || work.submission.is_some() {
+        return None;
+    }
+    let mut templates = work.attachments.iter().filter(|attachment|
+        attachment.kind == desktop_data::AttachmentKind::DriveFile
+            && attachment.drive_sharing == Some(DriveSharing::IndividualCopy));
+    let reference = templates.next()?.drive_reference.as_ref()?;
+    templates.all(|template| template.drive_reference.as_ref() != Some(reference))
+        .then(|| reference.clone())
+}
+
 fn matching_personal_copy<'a>(item: &'a Coursework, template: &desktop_data::Attachment) -> Option<&'a desktop_data::Attachment> {
     let mut matches = item.submission.as_ref()?.attachments.iter().filter(|file| file.is_personal_copy_of(template));
     let copy = matches.next()?;
@@ -10089,6 +10253,47 @@ mod tests {
         }
         app.teacher_topics.insert(1, Vec::new());
         assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::TeacherDrafts(1))));
+    }
+
+    #[test]
+    fn personal_copy_checks_reset_with_snapshot_and_discard_stale_reads() {
+        let (mut app, snapshot) = fixture();
+        app.install_snapshot(snapshot.clone());
+        app.personal_copy_checks.insert((1, 42), ("template".into(), true));
+        app.pending_personal_copy = Some((1, 42, "template".into()));
+        app.personal_copy_loading_generation = Some(app.personal_copy_generation);
+        app.install_snapshot(snapshot);
+        assert!(app.personal_copy_checks.is_empty());
+        assert!(app.pending_personal_copy.is_none());
+        let _ = app.update(Message::DetailLoaded(DetailRead::PersonalCopy(1, 42),
+            Ok(DetailData::PersonalCopy("template".into(), true))));
+        assert!(app.personal_copy_checks.is_empty());
+        app.personal_copy_checks.insert((1, 42), ("template".into(), true));
+        app.pending_personal_copy = Some((1, 42, "template".into()));
+        let _ = app.update(Message::SessionForgotten(Ok(())));
+        assert!(app.personal_copy_checks.is_empty());
+        assert!(app.pending_personal_copy.is_none());
+    }
+
+    #[test]
+    fn personal_copy_preparation_requires_one_unambiguous_template_and_no_submission() {
+        let (_, snapshot) = fixture();
+        let mut work = snapshot.coursework_for(1).unwrap().iter()
+            .find(|item| item.kind == CourseworkKind::Assignment).unwrap().clone();
+        work.submission = None;
+        let template = desktop_data::Attachment {
+            title: "Worksheet".into(), remote_id: None, kind: desktop_data::AttachmentKind::DriveFile,
+            url: None, drive_sharing: Some(DriveSharing::IndividualCopy),
+            drive_reference: Some("template-id".into()), drive_parent_reference: None,
+        };
+        work.attachments = vec![template.clone()];
+        assert_eq!(eligible_personal_copy_template(&work).as_deref(), Some("template-id"));
+        work.attachments.push(template.clone());
+        assert_eq!(eligible_personal_copy_template(&work), None);
+        work.attachments[1].drive_reference = Some("other-template".into());
+        assert_eq!(eligible_personal_copy_template(&work).as_deref(), Some("template-id"));
+        work.submission = Some(Submission::default());
+        assert_eq!(eligible_personal_copy_template(&work), None);
     }
 
     #[test]
