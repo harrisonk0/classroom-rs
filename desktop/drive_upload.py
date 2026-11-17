@@ -127,7 +127,7 @@ def get_file_link(bearer, file_id):
         return response.json()
 
 
-def download_file(bearer, file_id, temporary_path, resource_key=None):
+def download_file(bearer, file_id, temporary_path, resource_key=None, preview=False):
     if not isinstance(file_id, str) or not FILE_ID.fullmatch(file_id):
         raise UploadError("Invalid Drive file ID.")
     if resource_key is not None and (not isinstance(resource_key, str) or not FILE_ID.fullmatch(resource_key)):
@@ -140,7 +140,7 @@ def download_file(bearer, file_id, temporary_path, resource_key=None):
             session.headers["X-Goog-Drive-Resource-Keys"] = f"{file_id}/{resource_key}"
         endpoint = f"{FILES_ENDPOINT}/{file_id}"
         metadata = session.get(endpoint, params={
-            "fields": "id,mimeType,trashed,capabilities(canDownload)",
+            "fields": "id,mimeType,name,trashed,capabilities(canDownload)",
             "supportsAllDrives": "true",
         }, allow_redirects=False, timeout=(10, 30))
         if metadata.status_code != 200:
@@ -148,10 +148,23 @@ def download_file(bearer, file_id, temporary_path, resource_key=None):
         details = metadata.json()
         mime = details.get("mimeType")
         if (details.get("id") != file_id or details.get("trashed")
-                or not isinstance(mime, str) or mime.startswith("application/vnd.google-apps.")
+                or not isinstance(mime, str)
                 or details.get("capabilities", {}).get("canDownload") is not True):
             raise UploadError("Drive did not allow downloading this file. Open it in Drive instead.")
-        with session.get(endpoint, params={"alt": "media", "supportsAllDrives": "true"},
+        name = details.get("name") or "Classroom attachment"
+        params = {"alt": "media", "supportsAllDrives": "true"}
+        if mime.startswith("application/vnd.google-apps."):
+            if not preview or mime not in {
+                "application/vnd.google-apps.document", "application/vnd.google-apps.spreadsheet",
+                "application/vnd.google-apps.presentation", "application/vnd.google-apps.drawing",
+            }:
+                raise UploadError("Drive cannot download this type of file here. Open it in Drive instead.")
+            endpoint += "/export"
+            params = {"mimeType": "application/pdf"}
+            name = name if name.lower().endswith(".pdf") else name + ".pdf"
+        elif preview and not Path(name).suffix:
+            name += mimetypes.guess_extension(mime, strict=False) or ""
+        with session.get(endpoint, params=params,
                          allow_redirects=False, timeout=(15, 90), stream=True) as response:
             if response.status_code != 200:
                 raise UploadError(f"Drive could not download the file (HTTP {response.status_code}).")
@@ -164,7 +177,7 @@ def download_file(bearer, file_id, temporary_path, resource_key=None):
             expected = response.headers.get("Content-Length")
             if expected is not None and int(expected) != os.path.getsize(temporary_path):
                 raise UploadError("Drive returned an incomplete file.")
-    return {"saved": True}
+    return {"saved": True, "name": name} if preview else {"saved": True}
 
 
 def main():
@@ -181,7 +194,8 @@ def main():
         elif lookup:
             result = get_file_link(request["bearer"], request["file_id"])
         elif downloading:
-            result = download_file(request["bearer"], request["file_id"], request["temporary_path"], request.get("resource_key"))
+            result = download_file(request["bearer"], request["file_id"], request["temporary_path"],
+                                   request.get("resource_key"), request.get("preview", False))
         else:
             result = upload(Path(request["path"]), request["bearer"])
     except UploadError as error:
