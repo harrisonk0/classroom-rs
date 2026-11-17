@@ -8743,10 +8743,24 @@ impl App {
                 .on_press(Message::CopyClassroomLink(ClassroomLink::Item { course: course_id, item: id, kind })).into(),
             None => space().width(0).into(),
         };
+        let open_in_classroom: Element<'_, Message> = if item.kind == CourseworkKind::Assignment {
+            item.id.parse::<i64>().ok()
+                .and_then(|id| ClassroomLink::Item {
+                    course: course_id, item: id, kind: ItemLinkKind::Assignment,
+                }.web_url())
+                .filter(|_| !self.verify_live_course_count)
+                .map_or_else(|| space().width(0).into(), |url| {
+                    button("Open in Classroom").padding([6, 8]).style(quiet_style)
+                        .on_press(Message::OpenAttachment(url)).into()
+                })
+        } else {
+            space().width(0).into()
+        };
         let mut body = column![
             row![
                 button("‹ Back").style(quiet_style).padding([8, 10]).on_press(Message::CloseItem),
                 text(course_name).size(14).color(MUTED).width(Fill),
+                open_in_classroom,
                 copy_link,
             ].spacing(8).align_y(Alignment::Center),
             text(topic.map_or_else(|| item_label.to_owned(), |topic| {
