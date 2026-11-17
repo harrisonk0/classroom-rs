@@ -1,4 +1,6 @@
 /target/
+/dist/
+/desktop/runtime/
 /work/
 *.app/
 *.log

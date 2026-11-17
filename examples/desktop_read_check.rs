@@ -11,6 +11,13 @@ async fn main() {
         Ok(session) => session,
         Err(error) => { println!("Session failed: {error}"); return; }
     };
+    if std::env::args().nth(1).as_deref() == Some("--mention-coverage") {
+        let course = session.snapshot.courses.iter().find(|course| course.shows_on_home())
+            .expect("Read one visible class");
+        let members = auth::load_class_mentions(&session, course.id).await.expect("Read the visible class mention list");
+        println!("Addressable class members returned={}", members.len());
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--class-creation-permission") {
         let allowed = auth::can_create_classes(&session).await.expect("Read account class creation permission");
         println!("Account can create classes={allowed}");

@@ -170,8 +170,10 @@ impl Runtime {
         }
 
         let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        if let Some(workspace) = crate_root.parent().and_then(Path::parent) {
-            let tools = workspace.join("work/notebooklm-test");
+        let configured = std::env::var_os("CLASSROOM_RUNTIME_DIR").map(PathBuf::from);
+        let development = crate_root.join("desktop/runtime");
+        let legacy = crate_root.parent().and_then(Path::parent).map(|workspace| workspace.join("work/notebooklm-test"));
+        for tools in configured.into_iter().chain(Some(development)).chain(legacy) {
             let runtime = Self {
                 python: tools.join("venv/bin/python"),
                 sign_in: crate_root.join("desktop/google_sign_in.py"),

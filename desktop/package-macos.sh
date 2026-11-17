@@ -3,10 +3,15 @@
 set -euo pipefail
 project="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 workspace="$(cd -- "$project/../.." && pwd)"
-tools="$workspace/work/notebooklm-test"
-binary="${1:-$workspace/work/desktop-target/debug/classroom-desktop}"
-app="${2:-$workspace/outputs/Classroom for Mac.app}"
-staging="$(mktemp -d "$workspace/work/classroom-bundle.XXXXXX")"
+tools="${CLASSROOM_RUNTIME_DIR:-$project/desktop/runtime}"
+if [[ -z "${CLASSROOM_RUNTIME_DIR:-}" && ! -x "$tools/venv/bin/python" ]]; then
+  tools="$workspace/work/notebooklm-test"
+fi
+binary="${1:-${CARGO_TARGET_DIR:-$project/target}/release/classroom-desktop}"
+app="${2:-$project/dist/Classroom for Mac.app}"
+parent="$(dirname -- "$app")"
+mkdir -p -- "$parent"
+staging="$(mktemp -d "$parent/.classroom-bundle.XXXXXX")"
 candidate="$staging/Classroom for Mac.app"
 previous="$staging/previous.app"
 cleanup() {
@@ -70,8 +75,8 @@ cat > "$contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key><string>Classroom for Mac</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon.icns</string>
-  <key>CFBundleShortVersionString</key><string>0.76.0</string>
-  <key>CFBundleVersion</key><string>76</string>
+  <key>CFBundleShortVersionString</key><string>0.77.0</string>
+  <key>CFBundleVersion</key><string>77</string>
   <key>NSMicrophoneUsageDescription</key><string>Record audio when you choose to add a recording to an assignment.</string>
   <key>NSCameraUsageDescription</key><string>Record video when you choose to add a recording to an assignment.</string>
   <key>NSScreenCaptureUsageDescription</key><string>Record the screen area you select for an assignment.</string>
