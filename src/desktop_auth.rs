@@ -622,12 +622,14 @@ fn classwork_query(course_id: i64, drafts: bool) -> wire::StreamItemQueryRequest
         include_description: Some(true),
         description_read_method: Some(2),
         include_topic_id: Some(true),
+        include_creator_user_id: Some(true),
+        include_creation_timestamp: Some(true),
         include_classwork_sort_key: (!drafts).then_some(true),
-        publication_info_mask: drafts.then_some(PublicationInfoReadMask {
-            include_publication_status: Some(true),
-            include_scheduled_timestamp: Some(true),
-            include_scheduled_status: Some(true),
-            ..Default::default()
+        publication_info_mask: Some(PublicationInfoReadMask {
+            include_publication_timestamp: (!drafts).then_some(true),
+            include_publication_status: drafts.then_some(true),
+            include_scheduled_timestamp: drafts.then_some(true),
+            include_scheduled_status: drafts.then_some(true),
         }),
         material_mask: Some(MaterialReadMask {
             include_name: Some(true),
@@ -815,7 +817,9 @@ fn coursework(course_id: i64, item: classwork::StreamItem) -> Option<Coursework>
         maximum_points: task.as_ref().and_then(|task| task.grade_denominator)
             .filter(|points| points.is_finite() && *points > 0.0),
         kind,
-        author_id: (kind == CourseworkKind::Announcement).then(|| info.creator_user_id.and_then(|user| user.id)).flatten(),
+        author_id: info.creator_user_id.and_then(|user| user.id).filter(|id| *id > 0),
+        posted_at_millis: classroom_event_time(info.publication_info.and_then(|publication| publication.publication_timestamp))
+            .or_else(|| classroom_event_time(info.creation_timestamp)),
         question,
         question_sharing,
         originality_enabled,
@@ -1324,10 +1328,36 @@ pub async fn load_roster(session: &LiveSession, course_id: i64) -> Result<Vec<Co
 }
 
 async fn load_user_names(session: &LiveSession, ids: BTreeSet<i64>) -> Result<BTreeMap<i64, String>, String> {
+    Ok(load_user_profiles(session, ids, false).await?.into_iter()
+        .filter_map(|(id, profile)| Some((id, profile.name?))).collect())
+}
+
+#[derive(Clone)]
+pub struct UserProfile {
+    pub name: Option<String>,
+    pub photo_url: Option<String>,
+}
+
+pub async fn load_stream_profiles(session: &LiveSession, ids: BTreeSet<i64>) -> Result<BTreeMap<i64, UserProfile>, String> {
+    load_user_profiles(session, ids, true).await
+}
+
+#[cfg(test)]
+#[test]
+fn stream_profile_photo_fields_match_the_wire_tags() {
+    let mask = classwork::UserReadMask {
+        include_name: Some(true), include_photo_url: Some(true), ..Default::default()
+    };
+    assert_eq!(mask.encode_to_vec(), [0x08, 0x01, 0x20, 0x01]);
+    let user = classwork::User::decode(&[0x2a, 0x03, b'p', b'i', b'c'][..]).unwrap();
+    assert_eq!(user.photo_url.as_deref(), Some("pic"));
+}
+
+async fn load_user_profiles(session: &LiveSession, ids: BTreeSet<i64>, photos: bool) -> Result<BTreeMap<i64, UserProfile>, String> {
     use classwork::*;
     if ids.is_empty() { return Ok(BTreeMap::new()) }
     let response: QueryUserResponse = session.read_rpc("QueryUser", QueryUserRequest {
-        user_read_mask: Some(UserReadMask { include_name: Some(true), ..Default::default() }),
+        user_read_mask: Some(UserReadMask { include_name: Some(true), include_photo_url: photos.then_some(true), ..Default::default() }),
         filter_options: Some(UserFilterOptions {
             base_filter_options: Some(FilterOptions {
                 user_filter: ids.iter().map(|id| UserFilter {
@@ -1340,7 +1370,10 @@ async fn load_user_names(session: &LiveSession, ids: BTreeSet<i64>) -> Result<BT
     }).await?;
     Ok(response.user.into_iter().filter_map(|user| {
         let id = user.user_id?.id?;
-        ids.contains(&id).then_some((id, user.name?))
+        if !ids.contains(&id) { return None; }
+        let photo_url = user.photo_url.map(|url| if url.starts_with("//") { format!("https:{url}") } else { url })
+            .filter(|url| photos && artwork_host_is_allowed(url));
+        Some((id, UserProfile { name: user.name.filter(|name| !name.trim().is_empty()), photo_url }))
     }).collect())
 }
 
@@ -2893,7 +2926,10 @@ mod tests {
         assert_eq!(filter.allowed_status, [2]);
         assert_eq!(filter.publication_status, [2]);
         let mask = classwork::StreamReadMask::decode(request.read_mask.unwrap().as_slice()).unwrap();
-        assert_eq!(mask.assignment_mask.unwrap().stream_item_info_mask.unwrap().include_title, Some(true));
+        let info = mask.assignment_mask.unwrap().stream_item_info_mask.unwrap();
+        assert_eq!(info.include_title, Some(true));
+        assert_eq!(info.include_creation_timestamp, Some(true));
+        assert_eq!(info.publication_info_mask.unwrap().include_publication_timestamp, Some(true));
     }
 
     #[test]
@@ -2906,6 +2942,11 @@ mod tests {
                         course_id: Some(classwork::CourseId { id: Some(412) }),
                     }),
                     title: Some("Synthetic assignment".into()),
+                    creation_timestamp: Some(1_700_000_000_000),
+                    publication_info: Some(classwork::PublicationInfo {
+                        publication_timestamp: Some(1_700_000_060_000),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 }),
                 task_info: None,
@@ -2914,9 +2955,13 @@ mod tests {
             ..Default::default()
         };
         assert!(coursework(411, item.clone()).is_none());
-        let decoded = coursework(412, item).unwrap();
+        let decoded = coursework(412, item.clone()).unwrap();
         assert_eq!(decoded.id, "9");
         assert_eq!(decoded.title, "Synthetic assignment");
+        assert_eq!(decoded.posted_at_millis, Some(1_700_000_060_000));
+        let mut item = item;
+        item.assignment.as_mut().unwrap().stream_item_info.as_mut().unwrap().publication_info = None;
+        assert_eq!(coursework(412, item).unwrap().posted_at_millis, Some(1_700_000_000_000));
     }
 
     #[test]
@@ -2946,7 +2991,7 @@ pub use gradebook::{gradebook_coverage, load_course_grade};
 mod rubric;
 pub use rubric::load_rubric;
 
-pub use artwork::{artwork_updates, load_artworks};
+pub use artwork::{artwork_updates, load_artworks, profile_picture_updates};
 
 
 pub async fn forget_session(account: String) -> Result<(), String> {

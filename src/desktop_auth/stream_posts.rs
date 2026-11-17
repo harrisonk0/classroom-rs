@@ -323,6 +323,10 @@ fn post_read_mask(include_materials: bool, rich: bool) -> classwork::StreamReadM
                 description_read_method: rich.then_some(2),
                 include_creator_user_id: Some(true),
                 include_creation_timestamp: Some(true),
+                publication_info_mask: Some(classwork::PublicationInfoReadMask {
+                    include_publication_timestamp: Some(true),
+                    ..Default::default()
+                }),
                 material_mask: include_materials.then_some(classwork::MaterialReadMask {
                     include_name: Some(true), include_mime_type: Some(true), include_open_url: Some(true),
                     ..Default::default()

@@ -19,21 +19,29 @@ pub async fn load_artworks(urls: Vec<String>) -> Vec<(String, Handle)> {
 }
 
 pub fn artwork_updates(urls: Vec<String>) -> impl Stream<Item = (String, Handle)> + Send + 'static {
+    image_updates(urls, false)
+}
+
+pub fn profile_picture_updates(urls: Vec<String>) -> impl Stream<Item = (String, Handle)> + Send + 'static {
+    image_updates(urls, true)
+}
+
+fn image_updates(urls: Vec<String>, profile: bool) -> impl Stream<Item = (String, Handle)> + Send + 'static {
     let mut seen = BTreeSet::new();
     let urls: Vec<_> = urls.into_iter()
         .filter(|url| valid_photo_url(url) && seen.insert(url.clone()))
         .take(MAX_ARTWORKS)
         .collect();
     stream::iter(urls)
-        .map(fetch)
+        .map(move |url| fetch(url, profile))
         .buffer_unordered(MAX_CONCURRENT)
         .filter_map(future::ready)
 }
 
-async fn fetch(url: String) -> Option<(String, Handle)> {
+async fn fetch(url: String, profile: bool) -> Option<(String, Handle)> {
     let bytes = timeout(Duration::from_secs(14), fetch_bytes(&url)).await.ok()??;
     let size = bytes.len();
-    let image = tokio::task::spawn_blocking(move || decode(bytes)).await.ok()?;
+    let image = tokio::task::spawn_blocking(move || decode(bytes, profile)).await.ok()?;
     if image.is_none() && diagnostics_enabled() {
         eprintln!("Artwork decode failed: bytes={size}");
     }
@@ -109,7 +117,7 @@ fn diagnostics_enabled() -> bool {
     std::env::var_os("CLASSROOM_READ_ONLY_DIAGNOSTICS").is_some()
 }
 
-fn decode(bytes: Vec<u8>) -> Option<Handle> {
+fn decode(bytes: Vec<u8>, profile: bool) -> Option<Handle> {
     let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
     if !matches!(reader.format(), Some(image::ImageFormat::Jpeg | image::ImageFormat::Png | image::ImageFormat::WebP)) {
         return None;
@@ -119,7 +127,17 @@ fn decode(bytes: Vec<u8>) -> Option<Handle> {
     limits.max_image_height = Some(4096);
     limits.max_alloc = Some(80 * 1024 * 1024);
     reader.limits(limits);
-    let image = reader.decode().ok()?.thumbnail(1040, 416).to_rgba8();
+    let decoded = reader.decode().ok()?;
+    let image = if profile {
+        let mut image = decoded.resize_to_fill(72, 72, image::imageops::FilterType::Triangle).to_rgba8();
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let distance = (x as f32 - 35.5).hypot(y as f32 - 35.5);
+            pixel.0[3] = (f32::from(pixel.0[3]) * (36.5 - distance).clamp(0.0, 1.0)) as u8;
+        }
+        image
+    } else {
+        decoded.thumbnail(1040, 416).to_rgba8()
+    };
     Some(Handle::from_rgba(image.width(), image.height(), image.into_raw()))
 }
 

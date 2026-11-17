@@ -42,6 +42,7 @@ fn read_mask() -> classwork::UserReadMask {
     classwork::UserReadMask {
         include_name: None,
         include_email: None,
+        include_photo_url: None,
         user_setting_read_mask: Some(classwork::UserSettingReadMask {
             include_receive_email_notifications: Some(true),
             user_notification_category_read_mask: Some(classwork::UserNotificationCategoryReadMask {

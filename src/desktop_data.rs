@@ -409,6 +409,8 @@ pub struct Coursework {
     pub kind: CourseworkKind,
     #[serde(skip)]
     pub author_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub posted_at_millis: Option<i64>,
     #[serde(default)]
     pub question: Option<QuestionDetails>,
     #[serde(skip)]
@@ -712,6 +714,7 @@ impl Snapshot {
                 maximum_points: None,
                 kind,
                 author_id: None,
+                posted_at_millis: None,
                 question: (kind == CourseworkKind::Question).then_some(QuestionDetails::ShortAnswer),
                 question_sharing: None,
                 originality_enabled: None,

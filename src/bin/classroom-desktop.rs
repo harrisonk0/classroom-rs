@@ -576,6 +576,8 @@ enum Message {
     AttachmentOpened,
     AttachmentFailed,
     ArtworkLoaded(u64, String, image::Handle),
+    StreamProfilesLoaded(u64, Result<BTreeMap<i64, desktop_auth::UserProfile>, String>),
+    StreamProfilePictureLoaded(u64, String, image::Handle),
     SaveOffline,
     OpenOffline,
     DeleteOffline,
@@ -894,6 +896,8 @@ impl fmt::Debug for Message {
             Self::AttachmentOpened => "AttachmentOpened",
             Self::AttachmentFailed => "AttachmentFailed",
             Self::ArtworkLoaded(_, _, _) => "ArtworkLoaded",
+            Self::StreamProfilesLoaded(..) => "StreamProfilesLoaded",
+            Self::StreamProfilePictureLoaded(..) => "StreamProfilePictureLoaded",
             Self::SaveOffline => "SaveOffline",
             Self::OpenOffline => "OpenOffline",
             Self::DeleteOffline => "DeleteOffline",
@@ -1632,6 +1636,9 @@ struct App {
     previous_screen: Option<Screen>,
     artwork: BTreeMap<String, image::Handle>,
     artwork_generation: u64,
+    stream_profiles_requested: BTreeSet<i64>,
+    stream_profiles: BTreeMap<i64, desktop_auth::UserProfile>,
+    stream_profile_pictures: BTreeMap<String, image::Handle>,
     class_folders: BTreeMap<i64, String>,
     class_roles: BTreeMap<i64, CourseRole>,
     teacher_drafts: BTreeMap<i64, Vec<desktop_auth::TeacherDraft>>,
@@ -1789,6 +1796,9 @@ impl App {
             previous_screen: None,
             artwork: BTreeMap::new(),
             artwork_generation: 0,
+            stream_profiles_requested: BTreeSet::new(),
+            stream_profiles: BTreeMap::new(),
+            stream_profile_pictures: BTreeMap::new(),
             class_folders: if synthetic {
                 BTreeMap::from([(1, "https://drive.google.com/drive/folders/demo".into())])
             } else {
@@ -4653,6 +4663,17 @@ impl App {
             Message::ArtworkLoaded(generation, url, image) if generation == self.artwork_generation => {
                 self.artwork.insert(url, image);
             }
+            Message::StreamProfilesLoaded(generation, Ok(profiles)) if generation == self.artwork_generation => {
+                let urls = profiles.values().filter_map(|profile| profile.photo_url.as_ref())
+                    .filter(|url| !self.stream_profile_pictures.contains_key(url.as_str())).cloned().collect();
+                self.stream_profiles.extend(profiles);
+                return Task::run(desktop_auth::profile_picture_updates(urls), move |(url, image)| {
+                    Message::StreamProfilePictureLoaded(generation, url, image)
+                });
+            }
+            Message::StreamProfilePictureLoaded(generation, url, image) if generation == self.artwork_generation => {
+                self.stream_profile_pictures.insert(url, image);
+            }
             Message::SaveOffline if !self.has_pending_request() => self.save_offline(),
             Message::OpenOffline if !self.has_pending_request() => self.open_offline(),
             Message::DeleteOffline if !self.has_pending_request() => self.delete_offline(),
@@ -5445,7 +5466,8 @@ impl App {
         if !self.screen.uses_assignment_overview() {
             self.cancel_assignment_batch();
         }
-        self.dequeue_page_load().map_or_else(Task::none, |request| self.update(request))
+        let profiles = self.fetch_stream_profiles();
+        Task::batch([profiles, self.dequeue_page_load().map_or_else(Task::none, |request| self.update(request))])
     }
 
     fn assignment_courses(&self) -> BTreeSet<i64> {
@@ -5852,7 +5874,31 @@ impl App {
 
     fn reset_artwork(&mut self) {
         self.artwork.clear();
+        self.stream_profiles_requested.clear();
+        self.stream_profiles.clear();
+        self.stream_profile_pictures.clear();
         self.artwork_generation = self.artwork_generation.wrapping_add(1);
+    }
+
+    fn fetch_stream_profiles(&mut self) -> Task<Message> {
+        let Screen::Course(course) = self.screen else { return Task::none(); };
+        if self.tab != Tab::Stream || !self.can_read_pages() {
+            return Task::none();
+        }
+        let (Some(session), Some(snapshot)) = (self.session.clone(), self.snapshot.as_ref()) else { return Task::none(); };
+        let display = snapshot.courses.iter().find(|entry| entry.id == course)
+            .and_then(|entry| entry.stream_classwork_display);
+        let ids: BTreeSet<_> = snapshot.coursework_for(course).unwrap_or_default().iter()
+            .filter(|item| display.is_none_or(|display| display.shows(item.kind)))
+            .filter_map(|item| item.author_id)
+            .filter(|id| !self.stream_profiles_requested.contains(id))
+            .collect();
+        let ids: BTreeSet<_> = ids.into_iter().take(64).collect();
+        if ids.is_empty() { return Task::none(); }
+        self.stream_profiles_requested.extend(ids.iter().copied());
+        let generation = self.artwork_generation;
+        Task::perform(async move { desktop_auth::load_stream_profiles(&session, ids).await },
+            move |result| Message::StreamProfilesLoaded(generation, result))
     }
 
     fn fetch_artwork(&self) -> Task<Message> {
@@ -7050,15 +7096,12 @@ impl App {
     fn stream_row<'a>(&'a self, item: &'a Coursework) -> Element<'a, Message> {
         let course = item.course_id;
         if item.kind != CourseworkKind::Announcement {
-            return coursework_row(item, None);
+            return self.stream_card(item, coursework_row(item, None));
         }
-        let author = item.author_id.and_then(|id| self.snapshot.as_ref()?.roster_for(course)?
-            .iter().find(|member| member.id.parse::<i64>().ok() == Some(id)))
-            .map_or(item.title.as_str(), |member| member.display_name.as_str());
-        let mut card = column![
-            row![icon(Icon::Feed, ACTIVE_FG, 20), text(author).font(medium()).size(16).color(FG)]
-                .spacing(10).align_y(Alignment::Center),
-        ].spacing(11).width(Fill);
+        let mut card = column![].spacing(11).width(Fill);
+        if !item.title.eq_ignore_ascii_case("announcement") {
+            card = card.push(text(&item.title).font(medium()).size(16).color(FG).wrapping(text::Wrapping::WordOrGlyph));
+        }
         if !item.description.trim().is_empty() {
             card = card.push(formatted_description(&item.description, &item.description_styles, &item.description_bullets));
         }
@@ -7092,7 +7135,38 @@ impl App {
             actions = actions.push(button(label).padding([8, 12]).style(quiet_style)
                 .on_press_maybe(ready.then_some(Message::ConfirmDeleteStreamPost(course, id))));
         }
-        container(card.push(actions)).width(Fill).padding(16).style(|_| outline_surface(9.0)).into()
+        self.stream_card(item, card.push(actions).into())
+    }
+
+    fn stream_card<'a>(&'a self, item: &'a Coursework, body: Element<'a, Message>) -> Element<'a, Message> {
+        let mut card = column![].spacing(10).width(Fill);
+        let posted_at = item.posted_at_millis.and_then(DateTime::from_timestamp_millis)
+            .map(|date| date.with_timezone(&Local).format("%-d %b %Y at %H:%M").to_string());
+        let mut timestamp = posted_at.map(|label| text(label).size(13).color(MUTED));
+        if let Some(id) = item.author_id {
+            let profile = self.stream_profiles.get(&id);
+            let name = profile.and_then(|profile| profile.name.as_deref()).or_else(|| {
+                self.snapshot.as_ref()?.roster_for(item.course_id)?.iter()
+                    .find(|member| member.id.parse::<i64>().ok() == Some(id))
+                    .map(|member| member.display_name.as_str())
+            });
+            if let Some(name) = name {
+                let picture = profile.and_then(|profile| profile.photo_url.as_ref())
+                    .and_then(|url| self.stream_profile_pictures.get(url));
+                let face = picture.map_or_else(|| avatar(first_initial(name), BLUE, 36.0, 16.0), |picture|
+                    image(picture.clone()).width(36).height(36).into());
+                let mut heading = column![text(name).font(medium()).size(15).color(FG)].spacing(3);
+                if let Some(time) = timestamp.take() {
+                    heading = heading.push(time);
+                }
+                card = card.push(row![face, heading]
+                    .spacing(10).align_y(Alignment::Center));
+            }
+        }
+        if let Some(time) = timestamp {
+            card = card.push(time);
+        }
+        container(card.push(body)).width(Fill).padding(16).style(|_| outline_surface(9.0)).into()
     }
 
     fn stream_composer(&self, course: i64) -> Option<Element<'_, Message>> {
@@ -7652,7 +7726,7 @@ impl App {
     fn stream_classwork_notice<'a>(&'a self, item: &'a Coursework, expanded: bool) -> Element<'a, Message> {
         let row = coursework_row_with_preview(item, None, false);
         if !expanded || (item.description.trim().is_empty() && item.attachments.is_empty() && item.due_label.is_none()) {
-            return row;
+            return self.stream_card(item, row);
         }
         let mut details = column![].spacing(8);
         if let Some(due) = &item.due_label {
@@ -7664,8 +7738,7 @@ impl App {
         for attachment in &item.attachments {
             details = details.push(self.stream_attachment_row(item, attachment));
         }
-        container(column![row, container(details).padding([3, 14]).width(Fill)].spacing(4))
-            .width(Fill).padding(Padding { bottom: 11.0, ..Padding::ZERO }).style(|_| outline_surface(9.0)).into()
+        self.stream_card(item, column![row, details].spacing(4).into())
     }
 
     fn stream_attachment_row<'a>(&'a self, item: &'a Coursework, attachment: &'a desktop_data::Attachment) -> Element<'a, Message> {

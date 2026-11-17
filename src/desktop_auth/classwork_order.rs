@@ -162,6 +162,7 @@ mod tests {
             maximum_points: None,
             kind: CourseworkKind::Assignment,
             author_id: None,
+            posted_at_millis: None,
             question: None,
             question_sharing: None,
             originality_enabled: None,
