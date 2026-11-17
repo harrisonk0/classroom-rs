@@ -533,6 +533,8 @@ enum Message {
     CalendarFilter(ClassFilterOption),
     OpenAttachment(String),
     OpenDriveFile(String),
+    SaveDriveFile(desktop_data::Attachment),
+    DriveFileSaved(Result<bool, String>),
     DriveFileLinkLoaded(String, Result<String, String>),
     ClassFoldersLoaded(u64, Result<desktop_auth::OwnClassDetails, String>),
     ToggleTeacherDraft(i64, String),
@@ -846,6 +848,8 @@ impl fmt::Debug for Message {
             Self::CalendarFilter(_) => "CalendarFilter",
             Self::OpenAttachment(_) => "OpenAttachment",
             Self::OpenDriveFile(_) => "OpenDriveFile",
+            Self::SaveDriveFile(_) => "SaveDriveFile",
+            Self::DriveFileSaved(_) => "DriveFileSaved",
             Self::DriveFileLinkLoaded(..) => "DriveFileLinkLoaded",
             Self::ClassFoldersLoaded(_, _) => "ClassFoldersLoaded",
             Self::ToggleTeacherDraft(..) => "ToggleTeacherDraft",
@@ -1566,6 +1570,7 @@ struct App {
     class_creation_generation: u64,
     class_creation_allowed: bool,
     opening_drive_file: Option<String>,
+    saving_drive_file: bool,
     new_class: desktop_auth::NewClass,
     invitations: Option<Vec<Course>>,
     loading_invitations: bool,
@@ -1721,6 +1726,7 @@ impl App {
             class_creation_generation: 0,
             class_creation_allowed: false,
             opening_drive_file: None,
+            saving_drive_file: false,
             new_class: desktop_auth::NewClass::default(),
             invitations: None,
             loading_invitations: false,
@@ -1856,6 +1862,7 @@ impl App {
             return true;
         }
         self.busy || self.refreshing || self.changing_membership || self.posting_comment || self.choosing_submission_file
+            || self.saving_drive_file
             || self.saving_assignment_draft
             || self.saving_teacher_grade
             || self.saving_stream_settings
@@ -4223,6 +4230,37 @@ impl App {
                     let result = desktop_auth::lookup_drive_file_link(&session, &id).await;
                     (id, result)
                 }, |(id, result)| Message::DriveFileLinkLoaded(id, result));
+            }
+            #[cfg(target_os = "macos")]
+            Message::SaveDriveFile(attachment) if self.can_read_pages() && !self.has_pending_request() => {
+                let (Some(session), Some(id)) = (self.session.clone(), attachment.drive_reference.clone()) else {
+                    return Task::none();
+                };
+                self.saving_drive_file = true;
+                self.error = None;
+                self.notice = None;
+                return Task::perform(async move {
+                    let suggested: String = attachment.title.chars().map(|ch| match ch {
+                        '/' | ':' | '\\' => '-',
+                        ch if ch.is_control() => ' ',
+                        ch => ch,
+                    }).take(160).collect();
+                    let suggested = suggested.trim_matches(|ch: char| ch.is_whitespace() || ch == '.');
+                    let suggested = if suggested.is_empty() { "Classroom file" } else { suggested };
+                    let Some(path) = grade_export::choose_file_destination(suggested.into(), "Save a copy").await? else {
+                        return Ok(false);
+                    };
+                    desktop_auth::save_drive_file(&session, &id, attachment.url.as_deref(), &path).await?;
+                    Ok(true)
+                }, Message::DriveFileSaved);
+            }
+            Message::DriveFileSaved(result) => {
+                self.saving_drive_file = false;
+                match result {
+                    Ok(true) => self.notice = Some("File saved.".into()),
+                    Ok(false) => {}
+                    Err(error) => self.error = Some(error),
+                }
             }
             Message::DriveFileLinkLoaded(id, result) if self.opening_drive_file.as_ref() == Some(&id) => {
                 self.opening_drive_file = None;
@@ -9059,6 +9097,14 @@ impl App {
                     let open = button(text(label)).padding([8, 10]).style(outline_style)
                         .on_press_maybe(self.attachment_action(attachment));
                     let mut line = row![open].spacing(7).align_y(Alignment::Center);
+                    #[cfg(target_os = "macos")]
+                    if self.can_read_pages() && attachment.kind == desktop_data::AttachmentKind::DriveFile
+                        && attachment.drive_reference.is_some()
+                    {
+                        line = line.push(button("Save a copy…").style(quiet_style).padding([8, 10])
+                            .on_press_maybe((!self.has_pending_request())
+                                .then(|| Message::SaveDriveFile(attachment.clone()))));
+                    }
                     if let (Some(material), Ok(item_id)) = (attachment.remote_id, item.id.parse::<i64>())
                         && self.can_compose_comment(course_id, item_id)
                         && desktop_auth::SubmissionAction::for_submission(submission)
@@ -9318,6 +9364,13 @@ impl App {
                 ].spacing(12).align_y(Alignment::Center);
                 attachments = attachments.push(button(content).width(Fill).padding(13)
                     .style(outline_style).on_press_maybe(action));
+                #[cfg(target_os = "macos")]
+                if let Some(file) = file.filter(|file| self.can_read_pages()
+                    && file.kind == desktop_data::AttachmentKind::DriveFile && file.drive_reference.is_some())
+                {
+                    attachments = attachments.push(button("Save a copy…").style(quiet_style).padding([7, 10])
+                        .on_press_maybe((!self.has_pending_request()).then(|| Message::SaveDriveFile(file.clone()))));
+                }
                 if let (Ok(item_id), Some(reference)) = (item.id.parse::<i64>(), attachment.drive_reference.as_ref())
                     && self.personal_copy_ready(course_id, item_id, reference)
                 {
