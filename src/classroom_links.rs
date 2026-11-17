@@ -4,6 +4,7 @@ use tonic::codegen::http::Uri;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassroomLink {
     Course { course: i64, classwork: bool },
+    Topic { course: i64, topic: i64 },
     Item { course: i64, item: i64, kind: ItemLinkKind },
 }
 
@@ -12,6 +13,8 @@ pub enum ItemLinkKind {
     Assignment,
     ShortAnswer,
     MultipleChoice,
+    Material,
+    Announcement,
 }
 
 impl ClassroomLink {
@@ -37,6 +40,9 @@ impl ClassroomLink {
                 classwork: path[0] == "w",
             }),
             ["w", course, "t", "all"] => Some(Self::Course { course: link_id(course)?, classwork: true }),
+            ["w", course, "tc", topic] => Some(Self::Topic {
+                course: link_id(course)?, topic: link_id(topic)?,
+            }),
             ["c", course, kind, item, "details" | "dw"] => Some(Self::Item {
                 course: link_id(course)?,
                 item: link_id(item)?,
@@ -44,6 +50,8 @@ impl ClassroomLink {
                     "a" => ItemLinkKind::Assignment,
                     "sa" => ItemLinkKind::ShortAnswer,
                     "mc" => ItemLinkKind::MultipleChoice,
+                    "m" => ItemLinkKind::Material,
+                    "p" => ItemLinkKind::Announcement,
                     _ => return None,
                 },
             }),
@@ -53,7 +61,7 @@ impl ClassroomLink {
 
     pub fn course(self) -> i64 {
         match self {
-            Self::Course { course, .. } | Self::Item { course, .. } => course,
+            Self::Course { course, .. } | Self::Topic { course, .. } | Self::Item { course, .. } => course,
         }
     }
 
@@ -62,12 +70,18 @@ impl ClassroomLink {
         Some(match self {
             Self::Course { classwork, .. } =>
                 format!("https://classroom.google.com/{}/{course}", if classwork { "w" } else { "c" }),
+            Self::Topic { topic, .. } => {
+                let topic = encoded_id(topic)?;
+                format!("https://classroom.google.com/w/{course}/tc/{topic}")
+            }
             Self::Item { item, kind, .. } => {
                 let item = encoded_id(item)?;
                 let segment = match kind {
                     ItemLinkKind::Assignment => "a",
                     ItemLinkKind::ShortAnswer => "sa",
                     ItemLinkKind::MultipleChoice => "mc",
+                    ItemLinkKind::Material => "m",
+                    ItemLinkKind::Announcement => "p",
                 };
                 format!("https://classroom.google.com/c/{course}/{segment}/{item}/details")
             }
@@ -113,12 +127,17 @@ mod tests {
             Some(ClassroomLink::Course { course: 123, classwork: true }));
         assert_eq!(ClassroomLink::parse("https://classroom.google.com/c/MVpa/a/NDVa/dw"),
             Some(ClassroomLink::Item { course: 1, item: 45, kind: ItemLinkKind::Assignment }));
-        for kind in [ItemLinkKind::Assignment, ItemLinkKind::ShortAnswer, ItemLinkKind::MultipleChoice] {
+        for kind in [ItemLinkKind::Assignment, ItemLinkKind::ShortAnswer, ItemLinkKind::MultipleChoice,
+            ItemLinkKind::Material, ItemLinkKind::Announcement] {
             let target = ClassroomLink::Item { course: 123, item: 456, kind };
             let url = target.web_url().unwrap();
             assert_eq!(ClassroomLink::parse(&url), Some(target));
             assert_eq!(ClassroomLink::parse(&url.replace("/details", "/dw?authuser=1")), Some(target));
         }
+        let topic = ClassroomLink::Topic { course: 123, topic: 456 };
+        assert_eq!(ClassroomLink::parse(&topic.web_url().unwrap()), Some(topic));
+        assert_eq!(ClassroomLink::parse("https://classroom.google.com/u/1/w/MTIz/tc/NDVa"),
+            Some(ClassroomLink::Topic { course: 123, topic: 45 }));
     }
 
     #[test]
