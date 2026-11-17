@@ -28,6 +28,7 @@ Use **Save offline copy** only if you want a local copy of the courses and loade
 |---|---|
 | Sign-in, course grid and archive | Live Google Workspace sign-in and restart restoration verified. Google returned 41 courses with 17 active and 24 archived. The live check decoded all 11 distinct banner URLs returned by the 17 active courses. The palette and crop still need a side-by-side visual check. |
 | Class card teachers | A background batch reads display names for the course owner IDs returned with enrolled courses. Names appear below the section on Home cards and stay in memory. |
+| Email from People | Choose Email beside a class member to open your default mail app when Classroom returns an address for that member. The app keeps addresses in memory. |
 | Hidden classes | The course list and the signed-in student's membership lookup agreed for all 17 active Google Workspace classes, including two hidden classes. The card menu uses the Android member-visibility update. Both update encodings were checked offline. |
 | Class order | The signed-in Google Workspace account supplied sort keys for all 15 visible classes. ReorderCourse encodes the moving class and its adjacent classes. Offline tests cover first, last, intermediate and invalid placements. No live class order was changed. |
 | Stream, Classwork, People, comments and grades | Live read paths returned published items, topics, classmate and teacher display names, class comments, own submissions and released grades. Pages now load on navigation. |
@@ -83,6 +84,12 @@ The development workspace already contains the local sign-in runtime. Build the 
 ```sh
 cargo build --release --locked --features desktop --bin classroom-desktop
 cargo test --locked --features desktop --all-targets
+```
+
+The offline suite checks recording-file decoding and cleanup. Run the playback smoke test on a Mac with a working audio output.
+
+```sh
+cargo test --locked --features desktop --bin classroom-desktop native_preview_starts_and_stops_on_an_audio_output -- --ignored
 ```
 
 Run the built binary with `--screenshots /path/to/output` to render synthetic dashboard, classwork, Your work, To-do and calendar PNGs, including question editors and the calendar at minimum window size. Run `swift tests/desktop_capture.swift /path/to/output` to check that both short-answer drafts render in the standard-size captures. The macOS packaging script at `desktop/package-macos.sh` takes the built binary and an app destination. It signs and verifies the new bundle before replacing a previous Classroom for Mac build at that path. This build uses a local ad hoc signature.

@@ -153,8 +153,7 @@ pub(super) fn file_url(path: &Path) -> Result<Retained<NSURL>, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn native_preview_loads_a_local_fixture_without_microphone_access() {
+    fn silent_fixture() -> (Arc<TempDir>, PathBuf) {
         let temporary = Arc::new(tempfile::tempdir().unwrap());
         let path = temporary.path().join("fixture.wav");
         let mut wav = Vec::new();
@@ -173,14 +172,28 @@ mod tests {
         wav.extend(size.to_le_bytes());
         wav.resize(44 + size as usize, 0);
         std::fs::write(&path, wav).unwrap();
+        (temporary, path)
+    }
+
+    #[test]
+    fn native_preview_loads_a_local_fixture_without_microphone_access() {
+        let (temporary, path) = silent_fixture();
         let draft = Draft::load(temporary, path.clone()).unwrap();
         assert_eq!(draft.duration, Duration::from_secs(1));
-        draft.play_preview().unwrap();
-        draft.stop_preview();
         let (keep_alive, _) = draft.file();
         drop(draft);
         assert!(path.is_file());
         drop(keep_alive);
         assert!(!path.exists());
+    }
+
+    #[test]
+    #[ignore = "requires a working macOS audio output device"]
+    fn native_preview_starts_and_stops_on_an_audio_output() {
+        let (temporary, path) = silent_fixture();
+        let draft = Draft::load(temporary, path).unwrap();
+        draft.play_preview().unwrap();
+        draft.stop_preview();
+        assert!(!draft.is_playing());
     }
 }
