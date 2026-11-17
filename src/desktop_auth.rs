@@ -38,6 +38,8 @@ pub use student_muting::{load_student_muting, set_student_muted};
 pub use stream_settings::{ClassDetails, CourseStreamSettings, StreamPostingPolicy, TeacherClassSettings, load_teacher_class_settings, save_teacher_class_settings};
 mod teacher_assignment;
 mod assignment_fields;
+mod personal_copy;
+pub use personal_copy::{PersonalCopyPreparation, check_personal_copy_absent, prepare_personal_copy};
 mod originality;
 pub use originality::originality_report_url;
 mod teacher_submissions;
