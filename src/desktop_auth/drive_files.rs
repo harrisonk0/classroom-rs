@@ -155,15 +155,24 @@ pub async fn save_drive_file(
         return Err("Invalid Drive file ID.".into());
     }
     let resource_key = resource_key_for_file(url, file_id)?;
-    let destination = destination.to_str().ok_or("The destination path is not valid UTF-8.")?;
+    let directory = destination.parent().filter(|path| !path.as_os_str().is_empty())
+        .ok_or("Choose a folder for the downloaded file.")?;
+    let temporary = tempfile::Builder::new().prefix(".classroom-download-")
+        .tempfile_in(directory).map_err(|_| "Could not create a temporary file in that folder.")?;
+    let temporary_path = temporary.path().to_str().ok_or("The destination path is not valid UTF-8.")?;
     let bearer = session.bearer_for_request(None).await?;
     let payload = Zeroizing::new(serde_json::to_vec(&serde_json::json!({
-        "file_id": file_id, "destination": destination, "resource_key": resource_key,
+        "file_id": file_id, "temporary_path": temporary_path, "resource_key": resource_key,
         "bearer": bearer.as_str(),
     })).map_err(|_| "Could not prepare the file download.")?);
     let reply: SavedFile = run_drive_helper(&["--download"], payload, Duration::from_secs(600),
         "Drive did not finish downloading the file.").await?;
-    if reply.saved { Ok(()) } else { Err("Drive did not confirm the file was saved.".into()) }
+    if !reply.saved {
+        return Err("Drive did not confirm the file was saved.".into());
+    }
+    temporary.as_file().sync_all().map_err(|_| "Could not finish saving the file.")?;
+    temporary.persist(destination).map_err(|_| "Could not save the file in that folder.")?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -190,6 +199,19 @@ mod tests {
         assert!(resource_key_for_file(Some(url), "different").is_err());
         assert!(resource_key_for_file(Some("https://drive.google.com/open?id=exact-file&resourcekey=a&resourcekey=b"), "exact-file").is_err());
         assert_eq!(resource_key_for_file(None, "exact-file").unwrap(), None);
+    }
+
+    #[test]
+    fn caller_owned_temporary_file_is_removed_when_an_operation_is_cancelled() {
+        let folder = tempfile::tempdir().unwrap();
+        let destination = folder.path().join("existing.pdf");
+        std::fs::write(&destination, b"original").unwrap();
+        let temporary = tempfile::Builder::new().prefix(".classroom-download-").tempfile_in(folder.path()).unwrap();
+        let partial_path = temporary.path().to_owned();
+        std::fs::write(&partial_path, b"partial").unwrap();
+        drop(temporary);
+        assert!(!partial_path.exists());
+        assert_eq!(std::fs::read(destination).unwrap(), b"original");
     }
 
     #[test]

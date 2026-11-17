@@ -7,7 +7,6 @@ from pathlib import Path
 import re
 import stat
 import sys
-import tempfile
 from urllib.parse import urlsplit
 
 import requests
@@ -128,56 +127,44 @@ def get_file_link(bearer, file_id):
         return response.json()
 
 
-def download_file(bearer, file_id, destination, resource_key=None):
+def download_file(bearer, file_id, temporary_path, resource_key=None):
     if not isinstance(file_id, str) or not FILE_ID.fullmatch(file_id):
         raise UploadError("Invalid Drive file ID.")
     if resource_key is not None and (not isinstance(resource_key, str) or not FILE_ID.fullmatch(resource_key)):
         raise UploadError("Invalid Drive resource key.")
-    destination = Path(destination)
-    temporary = None
-    try:
-        with requests.Session() as session:
-            session.trust_env = False
-            session.headers["Authorization"] = f"Bearer {bearer}"
-            session.headers["Accept-Encoding"] = "identity"
-            if resource_key:
-                session.headers["X-Goog-Drive-Resource-Keys"] = f"{file_id}/{resource_key}"
-            endpoint = f"{FILES_ENDPOINT}/{file_id}"
-            metadata = session.get(endpoint, params={
-                "fields": "id,mimeType,trashed,capabilities(canDownload)",
-                "supportsAllDrives": "true",
-            }, allow_redirects=False, timeout=(10, 30))
-            if metadata.status_code != 200:
-                raise UploadError(f"Drive could not read file details (HTTP {metadata.status_code}).")
-            details = metadata.json()
-            mime = details.get("mimeType")
-            if (details.get("id") != file_id or details.get("trashed")
-                    or not isinstance(mime, str) or mime.startswith("application/vnd.google-apps.")
-                    or details.get("capabilities", {}).get("canDownload") is not True):
-                raise UploadError("Drive did not allow downloading this file. Open it in Drive instead.")
-            with session.get(endpoint, params={"alt": "media", "supportsAllDrives": "true"},
-                             allow_redirects=False, timeout=(15, 90), stream=True) as response:
-                if response.status_code != 200:
-                    raise UploadError(f"Drive could not download the file (HTTP {response.status_code}).")
-                with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".classroom-download-", delete=False) as output:
-                    temporary = output.name
-                    for chunk in response.iter_content(chunk_size=1024 * 1024):
-                        if chunk:
-                            output.write(chunk)
-                    output.flush()
-                    os.fsync(output.fileno())
-                expected = response.headers.get("Content-Length")
-                if expected is not None and int(expected) != os.path.getsize(temporary):
-                    raise UploadError("Drive returned an incomplete file.")
-                os.replace(temporary, destination)
-                temporary = None
-        return {"saved": True}
-    finally:
-        if temporary:
-            try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
+    with requests.Session() as session:
+        session.trust_env = False
+        session.headers["Authorization"] = f"Bearer {bearer}"
+        session.headers["Accept-Encoding"] = "identity"
+        if resource_key:
+            session.headers["X-Goog-Drive-Resource-Keys"] = f"{file_id}/{resource_key}"
+        endpoint = f"{FILES_ENDPOINT}/{file_id}"
+        metadata = session.get(endpoint, params={
+            "fields": "id,mimeType,trashed,capabilities(canDownload)",
+            "supportsAllDrives": "true",
+        }, allow_redirects=False, timeout=(10, 30))
+        if metadata.status_code != 200:
+            raise UploadError(f"Drive could not read file details (HTTP {metadata.status_code}).")
+        details = metadata.json()
+        mime = details.get("mimeType")
+        if (details.get("id") != file_id or details.get("trashed")
+                or not isinstance(mime, str) or mime.startswith("application/vnd.google-apps.")
+                or details.get("capabilities", {}).get("canDownload") is not True):
+            raise UploadError("Drive did not allow downloading this file. Open it in Drive instead.")
+        with session.get(endpoint, params={"alt": "media", "supportsAllDrives": "true"},
+                         allow_redirects=False, timeout=(15, 90), stream=True) as response:
+            if response.status_code != 200:
+                raise UploadError(f"Drive could not download the file (HTTP {response.status_code}).")
+            with open(temporary_path, "wb") as output:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            expected = response.headers.get("Content-Length")
+            if expected is not None and int(expected) != os.path.getsize(temporary_path):
+                raise UploadError("Drive returned an incomplete file.")
+    return {"saved": True}
 
 
 def main():
@@ -194,7 +181,7 @@ def main():
         elif lookup:
             result = get_file_link(request["bearer"], request["file_id"])
         elif downloading:
-            result = download_file(request["bearer"], request["file_id"], request["destination"], request.get("resource_key"))
+            result = download_file(request["bearer"], request["file_id"], request["temporary_path"], request.get("resource_key"))
         else:
             result = upload(Path(request["path"]), request["bearer"])
     except UploadError as error:
