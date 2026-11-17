@@ -450,7 +450,7 @@ enum Message {
     SetRubricCriteria(i64, i64, bool),
     OpenItem(i64, String),
     CloseItem,
-    EditComment(i64, i64, String),
+    EditComment(i64, i64, text_editor::Action),
     OpenCommentMentions(i64, i64),
     EmailClassMember(i64, i64),
     ClassMemberEmailLoaded(u64, i64, i64, Result<Vec<desktop_auth::ClassMention>, String>),
@@ -459,7 +459,7 @@ enum Message {
     InsertCommentMention(i64, i64, i64),
     CloseCommentMentions,
     PostComment(i64, i64),
-    EditPrivateComment(i64, i64, String),
+    EditPrivateComment(i64, i64, text_editor::Action),
     PostPrivateComment(i64, i64),
     ConfirmDeleteComment(CommentTarget),
     CancelDeleteComment,
@@ -1552,7 +1552,8 @@ struct App {
     rubric_open: bool,
     open_criteria: BTreeSet<usize>,
     page_errors: BTreeMap<PageRead, String>,
-    comment_drafts: BTreeMap<(i64, i64), String>,
+    comment_drafts: BTreeMap<(i64, i64), text_editor::Content>,
+    empty_comment_draft: text_editor::Content,
     people_email_generation: u64,
     people_email_pending: Option<(i64, i64)>,
     comment_mentions_generation: u64,
@@ -1594,7 +1595,7 @@ struct App {
     capture_generation: u64,
     choosing_submission_file: bool,
     private_feedback: BTreeMap<(i64, i64), Vec<Comment>>,
-    private_drafts: BTreeMap<(i64, i64), String>,
+    private_drafts: BTreeMap<(i64, i64), text_editor::Content>,
     confirming_comment_delete: Option<CommentTarget>,
     deleting_comment: Option<CommentTarget>,
     private_unconfirmed: BTreeSet<(i64, i64)>,
@@ -1707,6 +1708,7 @@ impl App {
             open_criteria: BTreeSet::new(),
             page_errors: BTreeMap::new(),
             comment_drafts: BTreeMap::new(),
+            empty_comment_draft: text_editor::Content::new(),
             people_email_generation: 0,
             people_email_pending: None,
             comment_mentions_generation: 0,
@@ -3375,10 +3377,10 @@ impl App {
                     _ => {}
                 }
             }
-            Message::EditPrivateComment(course, item, draft)
-                if self.can_compose_comment(course, item) && draft.len() <= 10_000 =>
+            Message::EditPrivateComment(course, item, action)
+                if self.can_compose_comment(course, item) && !self.posting_comment =>
             {
-                self.private_drafts.insert((course, item), draft);
+                edit_comment_draft(&mut self.private_drafts, (course, item), action);
             }
             Message::ConfirmDeleteComment(target) if self.may_delete_comment(target) => {
                 self.confirming_comment_delete = Some(target);
@@ -3438,7 +3440,8 @@ impl App {
                     && !self.private_unconfirmed.contains(&(course, item)) =>
             {
                 if let (Some(session), Some(draft)) = (self.session.clone(),
-                    self.private_drafts.get(&(course, item)).filter(|draft| !draft.trim().is_empty()).cloned())
+                    self.private_drafts.get(&(course, item)).map(text_editor::Content::text)
+                        .filter(|draft| !draft.trim().is_empty()))
                 {
                     self.posting_comment = true;
                     self.error = None;
@@ -3463,10 +3466,10 @@ impl App {
                     }
                 }
             }
-            Message::EditComment(course, item, draft) if self.can_compose_class_comment(course, item) => {
-                if draft.len() <= 10_000 {
-                    self.comment_drafts.insert((course, item), draft);
-                }
+            Message::EditComment(course, item, action)
+                if self.can_compose_class_comment(course, item) && !self.posting_comment =>
+            {
+                edit_comment_draft(&mut self.comment_drafts, (course, item), action);
             }
             Message::EmailClassMember(course, member) if self.can_email_class_member(course, member)
                 && self.people_email_pending.is_none() && !self.has_pending_request() =>
@@ -3532,8 +3535,15 @@ impl App {
                     .and_then(|entries| entries.iter().find(|entry| entry.id == member))
                     .map(|entry| entry.email.clone())
                     else { return Task::none(); };
-                let draft = self.comment_drafts.entry((course, item)).or_default();
-                append_comment_mention(draft, &email);
+                let draft = self.comment_drafts.entry((course, item)).or_insert_with(text_editor::Content::new);
+                let mut value = draft.text();
+                append_comment_mention(&mut value, &email);
+                *draft = text_editor::Content::with_text(&value);
+                draft.move_to(text_editor::Cursor {
+                    position: text_editor::Position { line: value.lines().count().saturating_sub(1),
+                        column: value.rsplit('\n').next().map_or(0, str::len) },
+                    selection: None,
+                });
                 self.comment_mentions = None;
             }
             Message::CloseCommentMentions => {
@@ -3545,7 +3555,8 @@ impl App {
                     && !self.comment_unconfirmed.contains(&(course, item)) =>
             {
                 if let (Some(session), Some(draft)) = (self.session.clone(),
-                    self.comment_drafts.get(&(course, item)).filter(|draft| !draft.trim().is_empty()).cloned())
+                    self.comment_drafts.get(&(course, item)).map(text_editor::Content::text)
+                        .filter(|draft| !draft.trim().is_empty()))
                 {
                     self.posting_comment = true;
                     self.error = None;
@@ -9203,18 +9214,24 @@ impl App {
             }
             if self.can_compose_comment(course_id, item_id) {
                 let key = (course_id, item_id);
-                let draft = self.private_drafts.get(&key).map_or("", String::as_str);
+                let draft = self.private_drafts.get(&key).unwrap_or(&self.empty_comment_draft);
+                let draft_text = draft.text();
                 let unconfirmed = self.private_unconfirmed.contains(&key);
-                let allowed = !self.has_pending_request() && !draft.trim().is_empty() && !unconfirmed;
+                let allowed = !self.has_pending_request() && !draft_text.trim().is_empty() && !unconfirmed;
                 if unconfirmed {
                     panel = panel.push(text("Check the updated comments before sending your draft again.").size(14).color(MUTED));
                 }
-                panel = panel.push(row![
-                    text_input("Add a private comment for your teacher…", draft).padding(10).width(Fill)
-                        .on_input(move |value| Message::EditPrivateComment(course_id, item_id, value)),
-                    button("Send privately").padding([9, 13]).style(primary_style)
-                        .on_press_maybe(allowed.then_some(Message::PostPrivateComment(course_id, item_id))),
-                ].spacing(8).align_y(Alignment::Center));
+                let editor = text_editor(draft).placeholder("Add a private comment for your teacher…")
+                    .height(86).padding(10);
+                let editor = if self.posting_comment { editor } else {
+                    editor.on_action(move |action| Message::EditPrivateComment(course_id, item_id, action))
+                };
+                panel = panel.push(column![
+                    editor,
+                    row![space().width(Fill), button(if self.posting_comment { "Sending…" } else { "Send privately" })
+                        .padding([9, 13]).style(primary_style)
+                        .on_press_maybe(allowed.then_some(Message::PostPrivateComment(course_id, item_id)))],
+                ].spacing(8));
             }
             body = body.push(container(panel).width(Fill).padding(16).style(|_| outline_surface(9.0)));
         }
@@ -9303,22 +9320,29 @@ impl App {
             }
             if self.can_compose_class_comment(course_id, stream_item_id) {
                 let key = (course_id, stream_item_id);
-                let draft = self.comment_drafts.get(&key).map_or("", String::as_str);
+                let draft = self.comment_drafts.get(&key).unwrap_or(&self.empty_comment_draft);
+                let draft_text = draft.text();
                 let unconfirmed = self.comment_unconfirmed.contains(&key);
-                let allowed = !self.has_pending_request() && !draft.trim().is_empty() && !unconfirmed;
+                let allowed = !self.has_pending_request() && !draft_text.trim().is_empty() && !unconfirmed;
                 if unconfirmed {
                     comments = comments.push(text("Check the updated comments before posting your draft again.").size(14).color(MUTED));
                 }
-                comments = comments.push(row![
-                    text_input("Add a class comment…", draft).padding(10).width(Fill)
-                        .on_input(move |value| Message::EditComment(course_id, stream_item_id, value)),
-                    button("@").padding([9, 12]).style(outline_style)
-                        .on_press_maybe((!self.has_pending_request())
-                            .then_some(Message::OpenCommentMentions(course_id, stream_item_id))),
-                    button(if self.posting_comment { "Posting…" } else { "Post" })
-                        .padding([9, 13]).style(primary_style)
-                        .on_press_maybe(allowed.then_some(Message::PostComment(course_id, stream_item_id))),
-                ].spacing(8).align_y(Alignment::Center));
+                let editor = text_editor(draft).placeholder("Add a class comment…").height(86).padding(10);
+                let editor = if self.posting_comment { editor } else {
+                    editor.on_action(move |action| Message::EditComment(course_id, stream_item_id, action))
+                };
+                comments = comments.push(column![
+                    editor,
+                    row![
+                        button("Mention").padding([9, 12]).style(outline_style)
+                            .on_press_maybe((!self.has_pending_request())
+                                .then_some(Message::OpenCommentMentions(course_id, stream_item_id))),
+                        space().width(Fill),
+                        button(if self.posting_comment { "Posting…" } else { "Post" })
+                            .padding([9, 13]).style(primary_style)
+                            .on_press_maybe(allowed.then_some(Message::PostComment(course_id, stream_item_id))),
+                    ].spacing(8).align_y(Alignment::Center),
+                ].spacing(8));
                 if let Some(picker) = self.comment_mentions.as_ref()
                     .filter(|picker| picker.course == course_id && picker.item == stream_item_id)
                 {
@@ -10178,6 +10202,19 @@ fn matching_personal_copy<'a>(item: &'a Coursework, template: &desktop_data::Att
     (copy.kind == desktop_data::AttachmentKind::DriveFile).then_some(copy)
 }
 
+fn edit_comment_draft(
+    drafts: &mut BTreeMap<(i64, i64), text_editor::Content>,
+    key: (i64, i64),
+    action: text_editor::Action,
+) {
+    let draft = drafts.entry(key).or_insert_with(text_editor::Content::new);
+    let original = draft.text();
+    draft.perform(action);
+    if draft.text().len() > 10_000 {
+        *draft = text_editor::Content::with_text(&original);
+    }
+}
+
 fn append_comment_mention(draft: &mut String, email: &str) {
     let prefix = if draft.is_empty() || draft.ends_with(char::is_whitespace) { "" } else { " " };
     if draft.len() + prefix.len() + email.len() + 2 <= 10_000 {
@@ -10340,6 +10377,39 @@ mod tests {
         assert!(!app.may_delete_visible_comment(2, CommentAudience::Private, &comment));
         app.stream_viewer_id = Some(10);
         assert!(app.may_delete_visible_comment(1, CommentAudience::Class, &comment));
+    }
+
+    #[test]
+    fn multiline_comment_drafts_keep_unicode_and_separate_threads() {
+        let mut drafts = BTreeMap::new();
+        let insert = |value: &str| text_editor::Action::Edit(text_editor::Edit::Paste(Arc::new(value.into())));
+        edit_comment_draft(&mut drafts, (1, 42), insert("First 📝\n\nSecond line"));
+        edit_comment_draft(&mut drafts, (1, 43), insert("Other thread"));
+        assert_eq!(drafts[&(1, 42)].text(), "First 📝\n\nSecond line");
+        assert_eq!(drafts[&(1, 43)].text(), "Other thread");
+        edit_comment_draft(&mut drafts, (1, 42), insert(&"x".repeat(10_000)));
+        assert_eq!(drafts[&(1, 42)].text(), "First 📝\n\nSecond line");
+    }
+
+    #[test]
+    fn failed_comment_send_preserves_multiline_drafts_until_confirmed() {
+        let (mut app, snapshot) = fixture();
+        app.install_snapshot(snapshot);
+        let key = (1, 42);
+        for drafts in [&mut app.comment_drafts, &mut app.private_drafts] {
+            drafts.insert(key, text_editor::Content::with_text("First 📝\nSecond"));
+        }
+        let _ = app.update(Message::CommentPosted(1, 42, Err("Unconfirmed".into())));
+        let _ = app.update(Message::PrivateCommentPosted(1, 42, Err("Unconfirmed".into())));
+        assert_eq!(app.comment_drafts[&key].text(), "First 📝\nSecond");
+        assert_eq!(app.private_drafts[&key].text(), "First 📝\nSecond");
+        let _ = app.update(Message::Navigate(Screen::Home));
+        assert_eq!(app.comment_drafts[&key].text(), "First 📝\nSecond");
+        assert_eq!(app.private_drafts[&key].text(), "First 📝\nSecond");
+        let _ = app.update(Message::CommentPosted(1, 42, Ok(())));
+        let _ = app.update(Message::PrivateCommentPosted(1, 42, Ok(())));
+        assert!(!app.comment_drafts.contains_key(&key));
+        assert!(!app.private_drafts.contains_key(&key));
     }
 
     #[test]
