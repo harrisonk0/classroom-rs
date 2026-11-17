@@ -1,0 +1,521 @@
+// Wire-layout evidence from the signed Classroom Android snapshot (3.70.1008934421).
+// These messages are embedded in the opaque fields of homeroom.proto. This file
+// declares no service and any model here may omit additional fields.
+syntax = "proto2";
+package homeroom.classwork_evidence;
+
+// Local names for identifiers match the field shapes on the wire.
+message CourseId {
+  optional int64 id = 1;
+}
+message StreamItemId {
+  optional int64 id = 1;
+  optional CourseId course_id = 2;
+}
+message TopicId {
+  optional string id = 1;
+  optional CourseId course_id = 2;
+}
+
+// StreamFilter: numeric enum values come from the signed snapshot object pool.
+// Field 1: 1 unknown, 2 active, 3 trashed.
+// Field 3: 1 unknown, 2 assignment, 3 post, 4 short answer, 5 question, 7 supplement.
+// Field 4: 1 unknown, 2 published, 3 draft.
+message StreamFilter {
+  repeated int32 allowed_status = 1;
+  repeated CourseId course_id = 2;
+  repeated int32 stream_type = 3;
+  repeated int32 publication_status = 4;
+  repeated TopicId topic_id = 12;
+}
+
+// StreamItemReadMask in the snapshot.
+message StreamReadMask {
+  optional AssignmentReadMask assignment_mask = 1;
+  optional PostReadMask post_mask = 2;
+  optional QuestionReadMask question_mask = 3;
+  optional SupplementReadMask supplement_mask = 6;
+}
+message AssignmentReadMask {
+  optional StreamItemInfoReadMask stream_item_info_mask = 1;
+  optional TaskInfoReadMask task_info_mask = 2;
+}
+message PostReadMask {
+  optional StreamItemInfoReadMask stream_item_info_mask = 1;
+}
+message QuestionReadMask {
+  optional StreamItemInfoReadMask stream_item_info_mask = 1;
+  optional TaskInfoReadMask task_info_mask = 2;
+  optional QuestionInfoReadMask question_info_mask = 3;
+}
+message QuestionInfoReadMask {
+  optional bool include_choices = 1;
+}
+message SupplementReadMask {
+  optional StreamItemInfoReadMask stream_item_info_mask = 1;
+}
+message StreamItemInfoReadMask {
+  optional bool include_creation_timestamp = 1;
+  optional bool include_last_edited_timestamp = 3;
+  optional bool include_creator_user_id = 4;
+  optional bool include_title = 5;
+  optional bool include_description = 6;
+  optional MaterialReadMask material_mask = 7;
+  optional PublicationInfoReadMask publication_info_mask = 8;
+  optional bool include_sorted_timestamp = 9;
+  optional bool include_topic_id = 12;
+  optional bool include_classwork_sort_key = 19;
+  optional int32 description_read_method = 20; // RICH_TEXT_PROTO = 2.
+}
+message MaterialReadMask {
+  optional bool include_name = 2;
+  optional bool include_mime_type = 4;
+  optional bool include_open_url = 6;
+  optional bool include_parent_reference = 9;
+  optional DriveItemReadMask drive_item_mask = 15;
+}
+message DriveItemReadMask {
+  optional bool include_sharing_option = 2;
+}
+message TaskInfoReadMask {
+  optional bool include_due_date = 1;
+  optional bool include_user_specified_due_time = 3;
+  optional bool include_grade_denominator = 4;
+  optional bool include_allow_edit_after_turn_in = 5;
+  optional VisibilityReadMask submissions_visibility_mask = 7;
+}
+message VisibilityReadMask {
+  optional bool include_visibility_type = 1;
+}
+
+// StreamItem2 in the snapshot. Preserve numeric enum values, including future
+// variants, without giving wire status a local application meaning by default.
+message StreamItem {
+  optional int32 stream_type = 1;
+  optional Assignment assignment = 2;
+  optional Post post = 3;
+  optional Question question = 4;
+  optional Supplement supplement = 6;
+}
+message StreamItemLookupRequest {
+  repeated StreamItemId stream_item_id = 1;
+  optional StreamReadMask read_mask = 2;
+}
+message StreamItemLookupResponse {
+  repeated StreamItemLookupResult result = 1;
+}
+message StreamItemLookupResult {
+  optional StreamItem stream_item = 3;
+}
+message ReorderClassworkRequest {
+  optional TopicId topic_id = 1;
+  optional StreamItemId stream_item_id = 2;
+  optional StreamItemId prev_stream_item_id = 3;
+  optional bytes prev_stream_item_key = 4;
+  optional StreamReadMask read_mask = 5;
+}
+message ReorderClassworkResponse {
+  optional StreamItem moved_stream_item = 1;
+}
+message Assignment {
+  optional StreamItemInfo stream_item_info = 1;
+  optional TaskInfo task_info = 2;
+}
+message Post {
+  optional StreamItemInfo stream_item_info = 1;
+}
+message Question {
+  optional StreamItemInfo stream_item_info = 1;
+  optional TaskInfo task_info = 2;
+  optional QuestionInfo question_info = 3;
+}
+message QuestionInfo {
+  optional int32 question_type = 1;
+  optional MultipleChoice multiple_choice = 3;
+}
+message MultipleChoice {
+  repeated string choice = 1;
+}
+message Supplement {
+  optional StreamItemInfo stream_item_info = 1;
+}
+message StreamItemInfo {
+  optional StreamItemId stream_item_id = 1;
+  optional int64 creation_timestamp = 2;
+  optional int64 last_edited_timestamp = 4;
+  optional UserId creator_user_id = 5;
+  optional string title = 6;
+  optional string description = 7;
+  repeated Material material = 8;
+  optional int32 status = 9;
+  optional PublicationInfo publication_info = 10;
+  optional int64 sorted_timestamp = 11;
+  repeated TopicId topic_id = 15;
+  optional bytes classwork_sort_key = 22;
+  optional RichText description_rich = 23;
+}
+message RichText {
+  optional string text = 1;
+  repeated InlineStyle style = 2;
+  repeated BlockStyle block_style = 3;
+}
+message InlineStyle {
+  repeated int32 type = 1;
+  optional int64 start = 2;
+}
+message BlockStyle {
+  optional int32 type = 1;
+  optional int64 start = 2;
+}
+message PublicationInfo {
+  optional int32 status = 1;
+  optional int64 publication_timestamp = 3;
+  optional int64 scheduled_timestamp = 5;
+  optional int32 scheduled_status = 6;
+}
+message PublicationInfoReadMask {
+  optional bool include_publication_status = 1;
+  optional bool include_publication_timestamp = 3;
+  optional bool include_scheduled_timestamp = 5;
+  optional bool include_scheduled_status = 6;
+}
+message TaskInfo {
+  // Static evidence proves the signed int64 wire type. Verify units before display.
+  optional int64 due_date = 1;
+  optional bool user_specified_due_time = 3;
+  optional double grade_denominator = 4;
+  optional bool allow_edit_after_turn_in = 5;
+  optional Visibility submissions_visibility = 7;
+}
+message Visibility {
+  optional int32 visibility_type = 1; // PRIVATE = 1, COURSE = 2.
+}
+message Material {
+  optional string name = 1;
+  optional string reference = 3;
+  optional int32 reference_type = 4;
+  optional string mime_type = 5;
+  optional string thumbnail_url = 6;
+  optional string open_url = 7;
+  optional bool is_new_upload = 8;
+  optional string parent_reference = 10;
+  optional DriveItem drive_item = 15;
+  optional int64 id = 18;
+}
+message DriveItem {
+  optional int32 sharing_option = 2;
+}
+
+message DriveItemCreateRequest {
+  optional CourseId course_id = 1;
+  optional int32 drive_item_type = 2;
+  optional string title = 4;
+  optional MaterialReadMask material_read_mask = 5;
+}
+message DriveItemCreateResponse {
+  optional Material material = 1;
+}
+
+// TopicQuery is a distinct RPC with these statically recovered envelope fields.
+message TopicQueryRequest {
+  optional bytes request_header = 1;
+  optional TopicReadMask read_mask = 2;
+  repeated TopicFilter filter = 3;
+  optional int32 response_order = 4;
+}
+message TopicFilter {
+  repeated CourseId course_id = 1;
+}
+message TopicReadMask {
+  optional bool include_name = 1;
+  optional bool include_last_updated_timestamp = 2;
+  optional bool include_classwork_sort_key = 3;
+}
+message TopicQueryResponse {
+  repeated Topic topic = 2;
+}
+message Topic {
+  optional TopicId topic_id = 1;
+  optional string name = 2;
+}
+
+// QuerySubmission read companions. The student path omits teacher-only grade fields.
+message SubmissionFilter {
+  optional FilterOptions base_filter_options = 1;
+  repeated StreamItemId stream_item_id = 2;
+  repeated SubmissionId submission_id = 3;
+  repeated CourseId course_id = 5;
+}
+message FilterOptions {
+  repeated UserFilter user_filter = 2;
+}
+message UserFilter {
+  optional bool use_current_user = 1;
+  optional UserId user_id = 2;
+}
+message SubmissionId {
+  optional int64 id = 1;
+  optional StreamItemId stream_item_id = 2;
+}
+message SubmissionReadMask {
+  optional bool include_creation_timestamp = 1;
+  optional bool include_current_state = 5;
+  optional bool include_student_user_id = 7;
+  optional bool include_live_grade_numerator = 8;
+  optional bool include_draft_grade_numerator = 9;
+  optional AssignmentSubmissionReadMask assignment_submission_mask = 14;
+  optional QuestionSubmissionReadMask question_submission_mask = 15;
+  optional bool include_submission_history = 19;
+  optional bool include_current_display_state_v2 = 20;
+  optional bool include_last_turned_in_timestamp = 21;
+  optional RubricScoreReadMask live_rubric_score_mask = 25;
+}
+message Submission {
+  optional SubmissionId submission_id = 1;
+  optional int64 creation_timestamp = 2;
+  optional int32 current_state = 6;
+  optional UserId student_user_id = 8;
+  optional double live_grade_numerator = 9;
+  optional double draft_grade_numerator = 10;
+  optional AssignmentSubmission assignment_submission = 16;
+  optional QuestionSubmission question_submission = 17;
+  repeated SubmissionHistory submission_history = 20;
+  optional int32 current_display_state_v2 = 21;
+  optional int64 last_turned_in_timestamp = 22;
+  optional RubricScore live_rubric_score = 26;
+}
+
+message SubmissionHistory {
+  optional SubmissionStateHistory state_history = 1;
+}
+message SubmissionStateHistory {
+  optional int32 state = 1;
+  optional int64 state_timestamp = 2;
+}
+
+message QuestionSubmissionReadMask {
+  optional bool include_answer = 1;
+}
+message QuestionSubmission {
+  optional int32 question_answer_type = 1;
+  optional string short_answer = 2;
+  optional string multiple_choice_answer = 3;
+}
+
+message AssignmentSubmissionReadMask {
+  optional MaterialReadMask material_mask = 1;
+}
+message AssignmentSubmission {
+  repeated Material material = 1;
+}
+
+// QueryUser and LookupCourseUser are separately recovered reads. QueryUser
+// includes only display names here. Account email and photos are omitted.
+message UserId {
+  optional int64 id = 1;
+}
+message QueryUserRequest {
+  optional UserReadMask user_read_mask = 2;
+  optional UserFilterOptions filter_options = 3;
+  optional string locale = 4;
+}
+message UserReadMask {
+  optional bool include_name = 1;
+  optional UserSettingReadMask user_setting_read_mask = 3;
+}
+message UserSettingReadMask {
+  optional bool include_receive_email_notifications = 1;
+  optional UserNotificationCategoryReadMask user_notification_category_read_mask = 9;
+}
+message UserNotificationCategoryReadMask {
+  optional bool include_localized_display_name = 1;
+  optional UserNotificationGroupReadMask user_notification_group_read_mask = 2;
+}
+message UserNotificationGroupReadMask {
+  optional bool include_group_tag = 1;
+  optional bool include_localized_display_name = 2;
+  optional bool include_receive_email_notifications = 4;
+}
+message UserFilterOptions {
+  optional FilterOptions base_filter_options = 1;
+}
+message QueryUserResponse {
+  repeated User user = 2;
+}
+message User {
+  optional UserId user_id = 1;
+  optional string name = 2;
+  optional UserSetting user_setting = 4;
+}
+message UserSetting {
+  optional bool receive_email_notifications = 1;
+  repeated UserNotificationCategory user_notification_category = 8;
+}
+message UserNotificationCategory {
+  optional string localized_display_name = 1;
+  repeated UserNotificationGroup user_notification_group = 2;
+}
+message UserNotificationGroup {
+  optional int32 group_tag = 1;
+  optional string localized_display_name = 2;
+  optional bool receive_email_notifications = 4;
+}
+message CourseUserLookupRequest {
+  repeated CourseUserId course_user_ids = 1;
+  optional CourseUserReadMask read_mask = 2;
+}
+message CourseUserReadMask {
+  optional bool include_course_role = 1;
+  optional FolderReadMask course_folder_read_mask = 2;
+  optional bool include_student_average = 5;
+  optional bool include_is_muted = 13;
+  optional CourseUserSettingReadMask course_user_setting_read_mask = 15;
+}
+message FolderReadMask {
+  optional bool include_open_url = 2;
+}
+message Folder {
+  optional string open_url = 3;
+}
+message CourseUserId {
+  optional CourseId course_id = 1;
+  optional UserId user_id = 2;
+}
+message CourseUserLookupResponse {
+  repeated CourseUserLookupResult results = 1;
+}
+message CourseUserLookupResult {
+  optional CourseUserId course_user_id = 2;
+  optional CourseUser course_user = 3;
+}
+message CourseUser {
+  optional CourseUserId course_user_id = 1;
+  // 1 unknown, 2 teacher, 3 student.
+  optional int32 course_role = 2;
+  optional Folder course_folder = 3;
+  optional int32 student_average = 6;
+  optional bool is_muted = 15;
+  optional CourseUserSetting course_user_setting = 17;
+}
+// These shapes also appear on Course.current_user_setting in homeroom.proto.
+message CourseUserSetting {
+  optional int32 course_visibility_setting = 8;
+}
+message CourseUserSettingReadMask {
+  optional bool include_course_visibility_setting = 5;
+}
+
+// The client must explicitly scope comments by a known item or submission.
+message QueryCommentRequest {
+  optional CommentReadMask comment_read_mask = 2;
+  optional CommentFilterOptions filter_options = 3;
+}
+message CommentReadMask {
+  optional bool include_creation_timestamp = 1;
+  optional bool include_creator_user_id = 4;
+  optional bool include_comment = 5;
+  optional CommentVisibilityReadMask visibility_mask = 7;
+}
+message CommentFilterOptions {
+  repeated StreamItemId stream_item_id = 2;
+  repeated CommentId comment_id = 3;
+  repeated SubmissionId submission_id = 4;
+  repeated CommentVisibility visibility = 5;
+}
+message QueryCommentResponse {
+  repeated Comment comment = 2;
+}
+message Comment {
+  optional CommentId comment_id = 1;
+  optional int64 creation_timestamp = 2;
+  optional UserId creator_user_id = 5;
+  optional string comment = 6;
+  optional int32 status = 8;
+  optional CommentVisibility visibility = 9;
+}
+message CommentVisibilityReadMask {
+  optional bool include_visibility_type = 1;
+}
+message CommentVisibility {
+  // PRIVATE=1, COURSE=2. The student composer only uses COURSE.
+  optional int32 visibility_type = 1;
+}
+message CommentId {
+  optional int64 id = 1;
+  optional StreamItemId stream_item_id = 2;
+  optional SubmissionId submission_id = 3;
+  optional int32 parent_type = 4;
+}
+
+
+// RubricService read shapes, recovered from the Android snapshot.
+message ListRubricsRequest {
+  optional RubricFilter filter_options = 1;
+}
+message RubricFilter {
+  optional RubricParentId parent_id = 2;
+}
+message RubricParentId {
+  optional RubricAssignmentId assignment_id = 1;
+}
+message RubricAssignmentId {
+  optional int64 course_id = 1;
+  optional int64 id = 2;
+}
+message ListRubricsResponse {
+  repeated Rubric rubric = 2;
+}
+message Rubric {
+  optional string title = 2;
+  repeated RubricCriterion criterion = 5;
+  optional RubricParentId parent_id = 6;
+}
+message RubricCriterion {
+  optional string id = 1;
+  optional string title = 2;
+  optional string description = 3;
+  repeated RubricRating rating = 4;
+}
+message RubricRating {
+  optional string id = 1;
+  optional string title = 2;
+  optional string description = 3;
+  optional double points = 4;
+}
+message RubricScoreReadMask {
+  optional CriterionScoreReadMask criterion_score_mask = 1;
+}
+message CriterionScoreReadMask {
+  optional bool include_rating_id = 1;
+  optional bool include_points = 2;
+}
+message RubricScore {
+  map<string, CriterionScore> criterion_score = 1;
+}
+message CriterionScore {
+  optional string rating_id = 1;
+  optional double points = 2;
+}
+
+
+// Read-only gradebook settings and the signed-in student's released total.
+message GradebookSettingsLookupRequest {
+  optional GradebookSettingsReadMask read_mask = 1;
+  repeated CourseId course_ids = 2;
+}
+message GradebookSettingsReadMask {
+  optional bool include_grade_display_setting = 1;
+  optional bool include_grade_calculation_type = 2;
+}
+message GradebookSettingsLookupResponse {
+  repeated GradebookSettingsLookupResult results = 1;
+}
+message GradebookSettingsLookupResult {
+  optional CourseId course_id = 2;
+  optional GradebookSettings gradebook_settings = 3;
+}
+message GradebookSettings {
+  optional CourseId course_id = 1;
+  optional int32 grade_display_setting = 4;
+  optional int32 grade_calculation_type = 5;
+}

@@ -1,0 +1,440 @@
+
+### QueryCourseRequest
+
+       .--> 0x0197e1f4      e81a1394       bl 0x1e44d94
+       :|   0x0197e208      de4346f9       ldr x30, [x30, 0xc80]    PP+0x30c80 target.kind:    variable | ref=124920 kind=variable cid=58 complete=true
+       :|   0x0197e218      424446f9       ldr x2, [x2, 0xc88]    PP+0x30c88 target.kind:    string | target.name:    "QueryCourseRequest" | ref=2878 kind=string cid=94 value="QueryCourseRequest" complete=true
+       :|   0x0197e224      da6ff797       bl 0x175a18c
+       :|   0x0197e22c      18c7f897       bl 0x17afe8c
+       :|   0x0197e240      400080d2       mov x0, 2
+       :|   0x0197e248      104a46f9       ldr x16, [x16, 0xc90]    PP+0x30c90 target.kind:    string | target.name:    "courseReadMask" | ref=49912 kind=string cid=94 value="courseReadMask" complete=true
+       :|   0x0197e254      102642f9       ldr x16, [x16, 0x448]    PP+0x2e448 target.kind:    variable | ref=124805 kind=variable cid=58 complete=true
+       :|   0x0197e260      3dc0ff97       bl 0x196e354
+       :|   0x0197e274      600080d2       mov x0, 3
+       :|   0x0197e27c      10e645f9       ldr x16, [x16, 0xbc8]    PP+0x2ebc8 target.kind:    string | target.name:    "filterOptions" | ref=15638 kind=string cid=94 value="filterOptions" complete=true
+       :|   0x0197e288      106241f9       ldr x16, [x16, 0x2c0]    PP+0x162c0 target.kind:    variable | ref=124887 kind=variable cid=58 complete=true
+       :|   0x0197e294      30c0ff97       bl 0x196e354
+
+### QueryCourseResponse
+
+       .--> 0x0197e33c      d26e1594       bl 0x1ed9e84
+       :|   0x0197e348      005446f9       ldr x0, [x0, 0xca8]    PP+0x30ca8 target.kind:    string | target.name:    "hrq.crs" | ref=33199 kind=string cid=94 value="hrq.crs" complete=true
+       :|   0x0197e354      901a1394       bl 0x1e44d94
+       :|   0x0197e368      de5b46f9       ldr x30, [x30, 0xcb0]    PP+0x30cb0 target.kind:    variable | ref=124921 kind=variable cid=58 complete=true
+       :|   0x0197e380      425c46f9       ldr x2, [x2, 0xcb8]    PP+0x30cb8 target.kind:    string | target.name:    "QueryCourseResponse" | ref=50400 kind=string cid=94 value="QueryCourseResponse" complete=true
+       :|   0x0197e38c      806ff797       bl 0x175a18c
+       :|   0x0197e394      bec6f897       bl 0x17afe8c
+       :|   0x0197e3a8      400080d2       mov x0, 2
+       :|   0x0197e3b0      10f642f9       ldr x16, [x16, 0x5e8]    PP+0x215e8 target.kind:    string | target.name:    "course" | ref=53206 kind=string cid=94 value="course" complete=true
+       :|   0x0197e3bc      10c245f9       ldr x16, [x16, 0xb80]    PP+0x2fb80 target.kind:    variable | ref=124808 kind=variable cid=58 complete=true
+       :|   0x0197e3c8      01c2ff97       bl 0x196ebcc
+
+### Course
+
+        |   0x01975a24      dc3c1394       bl 0x1e44d94
+        |   0x01975a38      dec345f9       ldr x30, [x30, 0xb80]    PP+0x2fb80 target.kind:    variable | ref=124808 kind=variable cid=58 complete=true
+        |   0x01975a48      42d040f9       ldr x2, [x2, 0x1a0]    PP+0x121a0 target.kind:    string | target.name:    "Course" | ref=55008 kind=string cid=94 value="Course" complete=true
+        |   0x01975a54      ce91f797       bl 0x175a18c
+        |   0x01975a68      200080d2       mov x0, 1
+        |   0x01975a70      106e44f9       ldr x16, [x16, 0x8d8]    PP+0xb8d8 target.kind:    string | target.name:    "courseId" | ref=26789 kind=string cid=94 value="courseId" complete=true
+        |   0x01975a7c      105a41f9       ldr x16, [x16, 0x2b0]    PP+0x162b0 target.kind:    variable | ref=124806 kind=variable cid=58 complete=true
+        |   0x01975a88      33e2ff97       bl 0x196e354
+        |   0x01975a90      420080d2       mov x2, 2
+        |   0x01975a98      63d446f9       ldr x3, [x3, 0xda8]    PP+0xdda8 target.kind:    string | target.name:    "creationTimestamp" | ref=49068 kind=string cid=94 value="creationTimestamp" complete=true
+        |   0x01975a9c      cfe1ff97       bl 0x196e1d8
+        |   0x01975aa4      fae8f897       bl 0x17afe8c
+        |   0x01975aac      f8e8f897       bl 0x17afe8c
+        |   0x01975ac0      a00080d2       mov x0, 5
+        |   0x01975ac8      10d246f9       ldr x16, [x16, 0xda0]    PP+0xdda0 target.kind:    string | target.name:    "creatorUserId" | ref=39582 kind=string cid=94 value="creatorUserId" complete=true
+        |   0x01975ad4      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+        |   0x01975ae0      1de2ff97       bl 0x196e354
+        |   0x01975ae8      c20080d2       mov x2, 6
+        |   0x01975af0      632441f9       ldr x3, [x3, 0x248]    PP+0x8248 target.kind:    string | target.name:    "title" | ref=23426 kind=string cid=94 value="title" complete=true
+        |   0x01975af4      f301ff97       bl 0x19362c0
+        |   0x01975b08      e00080d2       mov x0, 7
+        |   0x01975b10      10c645f9       ldr x16, [x16, 0xb88]    PP+0x2fb88 target.kind:    string | target.name:    "ownerUserId" | ref=11794 kind=string cid=94 value="ownerUserId" complete=true
+        |   0x01975b1c      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+        |   0x01975b28      29e4ff97       bl 0x196ebcc
+        |   0x01975b3c      000180d2       mov x0, 8
+        |   0x01975b44      109244f9       ldr x16, [x16, 0x920]    PP+0x18920 target.kind:    string | target.name:    "studentUserId" | ref=15444 kind=string cid=94 value="studentUserId" complete=true
+        |   0x01975b50      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+        |   0x01975b5c      1ce4ff97       bl 0x196ebcc
+        |   0x01975b64      220180d2       mov x2, 9
+        |   0x01975b6c      632045f9       ldr x3, [x3, 0xa40]    PP+0x19a40 target.kind:    string | target.name:    "subtitle" | ref=38350 kind=string cid=94 value="subtitle" complete=true
+        |   0x01975b70      d401ff97       bl 0x19362c0
+        |   0x01975b84      400180d2       mov x0, 0xa
+        |   0x01975b8c      10ca45f9       ldr x16, [x16, 0xb90]    PP+0x2fb90 target.kind:    string | target.name:    "courseSetting" | ref=32164 kind=string cid=94 value="courseSetting" complete=true
+        |   0x01975b98      107245f9       ldr x16, [x16, 0xae0]    PP+0x2fae0 target.kind:    variable | ref=124834 kind=variable cid=58 complete=true
+        |   0x01975ba4      ece1ff97       bl 0x196e354
+        |   0x01975bac      620180d2       mov x2, 0xb
+        |   0x01975bb4      636443f9       ldr x3, [x3, 0x6c8]    PP+0x236c8 target.kind:    string | target.name:    "enrollmentCode" | ref=25931 kind=string cid=94 value="enrollmentCode" complete=true
+        |   0x01975bb8      c201ff97       bl 0x19362c0
+        |   0x01975bc0      820180d2       mov x2, 0xc
+        |   0x01975bc8      633c40f9       ldr x3, [x3, 0x78]    PP+0xe078 target.kind:    string | target.name:    "description" | ref=35117 kind=string cid=94 value="description" complete=true
+        |   0x01975bcc      bd01ff97       bl 0x19362c0
+        |   0x01975bd4      aee8f897       bl 0x17afe8c
+        |   0x01975bdc      e20180d2       mov x2, 0xf
+        |   0x01975be4      634042f9       ldr x3, [x3, 0x480]    PP+0x20480 target.kind:    string | target.name:    "room" | ref=55468 kind=string cid=94 value="room" complete=true
+        |   0x01975be8      b601ff97       bl 0x19362c0
+        |   0x01975bfc      000280d2       mov x0, 0x10
+        |   0x01975c04      10ce45f9       ldr x16, [x16, 0xb98]    PP+0x2fb98 target.kind:    string | target.name:    "invitedStudentUserId" | ref=21836 kind=string cid=94 value="invitedStudentUserId" complete=true
+        |   0x01975c10      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+        |   0x01975c1c      ece3ff97       bl 0x196ebcc
+        |   0x01975c24      9ae8f897       bl 0x17afe8c
+        |   0x01975c2c      98e8f897       bl 0x17afe8c
+        |   0x01975c40      600280d2       mov x0, 0x13
+        |   0x01975c48      10d245f9       ldr x16, [x16, 0xba0]    PP+0x2fba0 target.kind:    string | target.name:    "mutedUserId" | ref=4499 kind=string cid=94 value="mutedUserId" complete=true
+        |   0x01975c54      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+        |   0x01975c60      dbe3ff97       bl 0x196ebcc
+        |   0x01975c74      800280d2       mov x0, 0x14
+        |   0x01975c7c      10d645f9       ldr x16, [x16, 0xba8]    PP+0x2fba8 target.kind:    string | target.name:    "currentUserSetting" | ref=50557 kind=string cid=94 value="currentUserSetting" complete=true
+        |   0x01975c88      10da45f9       ldr x16, [x16, 0xbb0]    PP+0x2fbb0 target.kind:    variable | ref=124832 kind=variable cid=58 complete=true
+        |   0x01975c94      b0e1ff97       bl 0x196e354
+        |   0x01975ca8      a00280d2       mov x0, 0x15
+        |   0x01975cb0      107241f9       ldr x16, [x16, 0x2e0]    PP+0x162e0 target.kind:    string | target.name:    "courseState" | ref=48208 kind=string cid=94 value="courseState" complete=true
+        |   0x01975cd4      14e6f897       bl 0x17af524
+        |   0x01975ce8      c00280d2       mov x0, 0x16
+        |   0x01975cf0      10de45f9       ldr x16, [x16, 0xbb8]    PP+0x2fbb8 target.kind:    string | target.name:    "teacherUserId" | ref=6757 kind=string cid=94 value="teacherUserId" complete=true
+        |   0x01975cfc      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+        |   0x01975d08      b1e3ff97       bl 0x196ebcc
+        |   0x01975d1c      e00280d2       mov x0, 0x17
+        |   0x01975d24      10e245f9       ldr x16, [x16, 0xbc0]    PP+0x2fbc0 target.kind:    string | target.name:    "invitedTeacherUserId" | ref=39051 kind=string cid=94 value="invitedTeacherUserId" complete=true
+        |   0x01975d30      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+        |   0x01975d3c      a4e3ff97       bl 0x196ebcc
+        |   0x01975d44      52e8f897       bl 0x17afe8c
+        |   0x01975d4c      50e8f897       bl 0x17afe8c
+        |   0x01975d54      4ee8f897       bl 0x17afe8c
+        |   0x01975d5c      620380d2       mov x2, 0x1b
+        |   0x01975d64      63f441f9       ldr x3, [x3, 0x3e8]    PP+0xf3e8 target.kind:    string | target.name:    "sortKey" | ref=32123 kind=string cid=94 value="sortKey" complete=true
+        |   0x01975d68      1ce1ff97       bl 0x196e1d8
+        |   0x01975d7c      800380d2       mov x0, 0x1c
+        |   0x01975d84      10d244f9       ldr x16, [x16, 0x9a0]    PP+0xe9a0 target.kind:    string | target.name:    "ownerDomainType" | ref=48570 kind=string cid=94 value="ownerDomainType" complete=true
+        |   0x01975d9c      e2e5f897       bl 0x17af524
+        |   0x01975da4      a20380d2       mov x2, 0x1d
+        |   0x01975dac      63cc46f9       ldr x3, [x3, 0xd98]    PP+0xdd98 target.kind:    string | target.name:    "abuseId" | ref=40683 kind=string cid=94 value="abuseId" complete=true
+        |   0x01975db0      4401ff97       bl 0x19362c0
+        |   0x01975db8      c20380d2       mov x2, 0x1e
+        |   0x01975dc0      63e845f9       ldr x3, [x3, 0xbd0]    PP+0x2fbd0 target.kind:    string | target.name:    "abuseDeletionTimestamp" | ref=51976 kind=string cid=94 value="abuseDeletionTimestamp" complete=true
+        |   0x01975dc4      05e1ff97       bl 0x196e1d8
+        |   0x01975dd8      e00380d2       mov x0, 0x1f
+        |   0x01975de0      104a42f9       ldr x16, [x16, 0x490]    PP+0x20490 target.kind:    string | target.name:    "subject" | ref=40274 kind=string cid=94 value="subject" complete=true
+        |   0x01975dec      10aa45f9       ldr x16, [x16, 0xb50]    PP+0x2fb50 target.kind:    variable | ref=124833 kind=variable cid=58 complete=true
+        |   0x01975df8      75e3ff97       bl 0x196ebcc
+        |   0x01975e0c      000480d2       mov x0, 0x20
+        |   0x01975e14      10f244f9       ldr x16, [x16, 0x9e0]    PP+0xe9e0 target.kind:    string | target.name:    "abuseState" | ref=22806 kind=string cid=94 value="abuseState" complete=true
+        |   0x01975e38      bbe5f897       bl 0x17af524
+        |   0x01975e4c      200480d2       mov x0, 0x21                ; '!'
+        |   0x01975e54      10f245f9       ldr x16, [x16, 0xbe0]    PP+0x2fbe0 target.kind:    string | target.name:    "invitedStudentUser" | ref=2423 kind=string cid=94 value="invitedStudentUser" complete=true
+        |   0x01975e60      10f645f9       ldr x16, [x16, 0xbe8]    PP+0x2fbe8 target.kind:    variable | ref=124827 kind=variable cid=58 complete=true
+        |   0x01975e6c      58e3ff97       bl 0x196ebcc
+        |   0x01975e80      400480d2       mov x0, 0x22                ; '\"'
+        |   0x01975e88      10fa45f9       ldr x16, [x16, 0xbf0]    PP+0x2fbf0 target.kind:    string | target.name:    "invitedTeacherUser" | ref=9040 kind=string cid=94 value="invitedTeacherUser" complete=true
+        |   0x01975e94      10f645f9       ldr x16, [x16, 0xbe8]    PP+0x2fbe8 target.kind:    variable | ref=124827 kind=variable cid=58 complete=true
+        |   0x01975ea0      4be3ff97       bl 0x196ebcc
+        |   0x01975eb0      600480d2       mov x0, 0x23                ; '#'
+        |   0x01975eb8      10fe45f9       ldr x16, [x16, 0xbf8]    PP+0x2fbf8 target.kind:    string | target.name:    "reorderingSortKey" | ref=42484 kind=string cid=94 value="reorderingSortKey" complete=true
+        |   0x01975ec0      000480d2       mov x0, 0x20
+        |   0x01975ecc      e4ceff97       bl 0x1969a5c
+        |   0x01975ed4      eee7f897       bl 0x17afe8c
+        |   0x01975edc      ece7f897       bl 0x17afe8c
+        |   0x01975ef0      e00480d2       mov x0, 0x27                ; '\''
+        |   0x01975ef8      100246f9       ldr x16, [x16, 0xc00]    PP+0x2fc00 target.kind:    string | target.name:    "readyState" | ref=48102 kind=string cid=94 value="readyState" complete=true
+        |   0x01975f1c      82e5f897       bl 0x17af524
+        |   0x01975f30      000580d2       mov x0, 0x28                ; '('
+        |   0x01975f38      100646f9       ldr x16, [x16, 0xc08]    PP+0x2fc08 target.kind:    string | target.name:    "courseFeatureFlags" | ref=18967 kind=string cid=94 value="courseFeatureFlags" complete=true
+        |   0x01975f44      104245f9       ldr x16, [x16, 0xa80]    PP+0x2fa80 target.kind:    variable | ref=124828 kind=variable cid=58 complete=true
+        |   0x01975f50      01e1ff97       bl 0x196e354
+        |   0x01975f58      cde7f897       bl 0x17afe8c
+        |   0x01975f60      cbe7f897       bl 0x17afe8c
+        |   0x01975f74      600580d2       mov x0, 0x2b                ; '+'
+        |   0x01975f7c      100a46f9       ldr x16, [x16, 0xc10]    PP+0x2fc10 target.kind:    string | target.name:    "videoCallInfo" | ref=30053 kind=string cid=94 value="videoCallInfo" complete=true
+        |   0x01975f88      100e46f9       ldr x16, [x16, 0xc18]    PP+0x2fc18 target.kind:    variable | ref=124831 kind=variable cid=58 complete=true
+        |   0x01975f94      f0e0ff97       bl 0x196e354
+        |   0x01975f9c      bce7f897       bl 0x17afe8c
+        |   0x01975fa4      bae7f897       bl 0x17afe8c
+        |   0x01975fac      b8e7f897       bl 0x17afe8c
+        |   0x01975fc0      e00580d2       mov x0, 0x2f                ; '/'
+        |   0x01975fc8      101246f9       ldr x16, [x16, 0xc20]    PP+0x2fc20 target.kind:    string | target.name:    "gradingSettings" | ref=32105 kind=string cid=94 value="gradingSettings" complete=true
+        |   0x01975fd4      101646f9       ldr x16, [x16, 0xc28]    PP+0x2fc28 target.kind:    variable | ref=124830 kind=variable cid=58 complete=true
+        |   0x01975fe0      dde0ff97       bl 0x196e354
+        |   0x01975fe8      a9e7f897       bl 0x17afe8c
+        |   0x01975ff0      a7e7f897       bl 0x17afe8c
+        |   0x01975ff8      a5e7f897       bl 0x17afe8c
+        |   0x0197600c      600680d2       mov x0, 0x33                ; '3'
+        |   0x01976014      101a46f9       ldr x16, [x16, 0xc30]    PP+0x2fc30 target.kind:    string | target.name:    "courseFeatureReadyStates" | ref=46465 kind=string cid=94 value="courseFeatureReadyStates" complete=true
+        |   0x01976020      101e46f9       ldr x16, [x16, 0xc38]    PP+0x2fc38 target.kind:    variable | ref=124829 kind=variable cid=58 complete=true
+        |   0x0197602c      cae0ff97       bl 0x196e354
+        |   0x01976034      96e7f897       bl 0x17afe8c
+        |   0x0197603c      94e7f897       bl 0x17afe8c
+        |   0x01976044      92e7f897       bl 0x17afe8c
+        |   0x0197604c      e20680d2       mov x2, 0x37                ; '7'
+        |   0x01976054      633442f9       ldr x3, [x3, 0x468]    PP+0x20468 target.kind:    string | target.name:    "gradeLevels" | ref=1445 kind=string cid=94 value="gradeLevels" complete=true
+        |   0x01976058      9a00ff97       bl 0x19362c0
+        |   0x01976060      8be7f897       bl 0x17afe8c
+        |   0x01976068      89e7f897       bl 0x17afe8c
+        |   0x01976070      87e7f897       bl 0x17afe8c
+
+### CourseIdVariantB
+
+       .--> 0x01975538      173e1394       bl 0x1e44d94
+       :|   0x0197554c      de5b41f9       ldr x30, [x30, 0x2b0]    PP+0x162b0 target.kind:    variable | ref=124806 kind=variable cid=58 complete=true
+       :|   0x0197555c      421846f9       ldr x2, [x2, 0xc30]    PP+0x2ec30 target.kind:    string | target.name:    "CourseId" | ref=11866 kind=string cid=94 value="CourseId" complete=true
+       :|   0x01975568      0993f797       bl 0x175a18c
+       :|   0x01975570      220080d2       mov x2, 1
+       :|   0x01975574      634355f9       ldr x3, [x27, 0x2a80]    PP+0x2a80 target.kind:    string | target.name:    "id" | ref=7001 kind=string cid=94 value="id" complete=true
+       :|   0x01975578      18e3ff97       bl 0x196e1d8
+
+### CourseReadMask
+
+        |   0x0197eee4      ac171394       bl 0x1e44d94
+        |   0x0197eef8      de2742f9       ldr x30, [x30, 0x448]    PP+0x2e448 target.kind:    variable | ref=124805 kind=variable cid=58 complete=true
+        |   0x0197ef08      422842f9       ldr x2, [x2, 0x450]    PP+0x2e450 target.kind:    string | target.name:    "CourseReadMask" | ref=10802 kind=string cid=94 value="CourseReadMask" complete=true
+        |   0x0197ef14      9e6cf797       bl 0x175a18c
+        |   0x0197ef1c      220080d2       mov x2, 1
+        |   0x0197ef24      632c42f9       ldr x3, [x3, 0x458]    PP+0x2e458 target.kind:    string | target.name:    "includeCreationTimestamp" | ref=29390 kind=string cid=94 value="includeCreationTimestamp" complete=true
+        |   0x0197ef28      62defe97       bl 0x19368b0
+        |   0x0197ef30      d7c3f897       bl 0x17afe8c
+        |   0x0197ef38      d5c3f897       bl 0x17afe8c
+        |   0x0197ef40      820080d2       mov x2, 4
+        |   0x0197ef48      633042f9       ldr x3, [x3, 0x460]    PP+0x2e460 target.kind:    string | target.name:    "includeCreatorUserId" | ref=47504 kind=string cid=94 value="includeCreatorUserId" complete=true
+        |   0x0197ef4c      59defe97       bl 0x19368b0
+        |   0x0197ef54      a20080d2       mov x2, 5
+        |   0x0197ef5c      63f441f9       ldr x3, [x3, 0x3e8]    PP+0x2e3e8 target.kind:    string | target.name:    "includeTitle" | ref=22516 kind=string cid=94 value="includeTitle" complete=true
+        |   0x0197ef60      54defe97       bl 0x19368b0
+        |   0x0197ef68      c20080d2       mov x2, 6
+        |   0x0197ef70      633442f9       ldr x3, [x3, 0x468]    PP+0x2e468 target.kind:    string | target.name:    "includeOwnerUserId" | ref=44475 kind=string cid=94 value="includeOwnerUserId" complete=true
+        |   0x0197ef74      4fdefe97       bl 0x19368b0
+        |   0x0197ef7c      e20080d2       mov x2, 7
+        |   0x0197ef84      633842f9       ldr x3, [x3, 0x470]    PP+0x2e470 target.kind:    string | target.name:    "includeStudentUserId" | ref=31707 kind=string cid=94 value="includeStudentUserId" complete=true
+        |   0x0197ef88      4adefe97       bl 0x19368b0
+        |   0x0197ef90      020180d2       mov x2, 8
+        |   0x0197ef98      633c42f9       ldr x3, [x3, 0x478]    PP+0x2e478 target.kind:    string | target.name:    "includeSubtitle" | ref=24816 kind=string cid=94 value="includeSubtitle" complete=true
+        |   0x0197ef9c      45defe97       bl 0x19368b0
+        |   0x0197efb0      200180d2       mov x0, 9
+        |   0x0197efb8      104242f9       ldr x16, [x16, 0x480]    PP+0x2e480 target.kind:    string | target.name:    "courseSettingReadMask" | ref=42786 kind=string cid=94 value="courseSettingReadMask" complete=true
+        |   0x0197efc4      104642f9       ldr x16, [x16, 0x488]    PP+0x2e488 target.kind:    variable | ref=124937 kind=variable cid=58 complete=true
+        |   0x0197efd0      e1bcff97       bl 0x196e354
+        |   0x0197efd8      420180d2       mov x2, 0xa
+        |   0x0197efe0      634842f9       ldr x3, [x3, 0x490]    PP+0x2e490 target.kind:    string | target.name:    "includeEnrollmentCode" | ref=47278 kind=string cid=94 value="includeEnrollmentCode" complete=true
+        |   0x0197efe4      33defe97       bl 0x19368b0
+        |   0x0197efec      620180d2       mov x2, 0xb
+        |   0x0197eff4      634c42f9       ldr x3, [x3, 0x498]    PP+0x2e498 target.kind:    string | target.name:    "includeDescription" | ref=7737 kind=string cid=94 value="includeDescription" complete=true
+        |   0x0197eff8      2edefe97       bl 0x19368b0
+        |   0x0197f000      a3c3f897       bl 0x17afe8c
+        |   0x0197f008      a1c3f897       bl 0x17afe8c
+        |   0x0197f010      c20180d2       mov x2, 0xe
+        |   0x0197f018      635042f9       ldr x3, [x3, 0x4a0]    PP+0x2e4a0 target.kind:    string | target.name:    "includeRoom" | ref=5690 kind=string cid=94 value="includeRoom" complete=true
+        |   0x0197f01c      25defe97       bl 0x19368b0
+        |   0x0197f024      e20180d2       mov x2, 0xf
+        |   0x0197f02c      635442f9       ldr x3, [x3, 0x4a8]    PP+0x2e4a8 target.kind:    string | target.name:    "includeInvitedStudentUserId" | ref=24929 kind=string cid=94 value="includeInvitedStudentUserId" complete=true
+        |   0x0197f030      20defe97       bl 0x19368b0
+        |   0x0197f038      95c3f897       bl 0x17afe8c
+        |   0x0197f040      93c3f897       bl 0x17afe8c
+        |   0x0197f048      420280d2       mov x2, 0x12
+        |   0x0197f050      635842f9       ldr x3, [x3, 0x4b0]    PP+0x2e4b0 target.kind:    string | target.name:    "includeMutedUserId" | ref=1075 kind=string cid=94 value="includeMutedUserId" complete=true
+        |   0x0197f054      17defe97       bl 0x19368b0
+        |   0x0197f068      a00280d2       mov x0, 0x15
+        |   0x0197f070      106242f9       ldr x16, [x16, 0x4c0]    PP+0x2e4c0 target.kind:    string | target.name:    "currentUserSettingReadMask" | ref=21090 kind=string cid=94 value="currentUserSettingReadMask" complete=true
+        |   0x0197f07c      106642f9       ldr x16, [x16, 0x4c8]    PP+0x2e4c8 target.kind:    variable | ref=124936 kind=variable cid=58 complete=true
+        |   0x0197f088      b3bcff97       bl 0x196e354
+        |   0x0197f090      c20280d2       mov x2, 0x16
+        |   0x0197f098      636842f9       ldr x3, [x3, 0x4d0]    PP+0x2e4d0 target.kind:    string | target.name:    "includeCourseState" | ref=35120 kind=string cid=94 value="includeCourseState" complete=true
+        |   0x0197f09c      05defe97       bl 0x19368b0
+        |   0x0197f0a4      e20280d2       mov x2, 0x17
+        |   0x0197f0ac      636c42f9       ldr x3, [x3, 0x4d8]    PP+0x2e4d8 target.kind:    string | target.name:    "includeTeacherUserId" | ref=47779 kind=string cid=94 value="includeTeacherUserId" complete=true
+        |   0x0197f0b0      00defe97       bl 0x19368b0
+        |   0x0197f0b8      020380d2       mov x2, 0x18
+        |   0x0197f0c0      637042f9       ldr x3, [x3, 0x4e0]    PP+0x2e4e0 target.kind:    string | target.name:    "includeInvitedTeacherUserId" | ref=8344 kind=string cid=94 value="includeInvitedTeacherUserId" complete=true
+        |   0x0197f0c4      fbddfe97       bl 0x19368b0
+        |   0x0197f0cc      220380d2       mov x2, 0x19
+        |   0x0197f0d4      637442f9       ldr x3, [x3, 0x4e8]    PP+0x2e4e8 target.kind:    string | target.name:    "includeCalendarUrl" | ref=39303 kind=string cid=94 value="includeCalendarUrl" complete=true
+        |   0x0197f0d8      f6ddfe97       bl 0x19368b0
+        |   0x0197f0e0      6bc3f897       bl 0x17afe8c
+        |   0x0197f0e8      69c3f897       bl 0x17afe8c
+        |   0x0197f0f0      67c3f897       bl 0x17afe8c
+        |   0x0197f104      a00380d2       mov x0, 0x1d
+        |   0x0197f10c      107e42f9       ldr x16, [x16, 0x4f8]    PP+0x2e4f8 target.kind:    string | target.name:    "subjectReadMask" | ref=119 kind=string cid=94 value="subjectReadMask" complete=true
+        |   0x0197f118      10d241f9       ldr x16, [x16, 0x3a0]    PP+0x2e3a0 target.kind:    variable | ref=124939 kind=variable cid=58 complete=true
+        |   0x0197f124      8cbcff97       bl 0x196e354
+        |   0x0197f12c      c20380d2       mov x2, 0x1e
+        |   0x0197f134      638042f9       ldr x3, [x3, 0x500]    PP+0x2e500 target.kind:    string | target.name:    "includeAbuseId" | ref=9250 kind=string cid=94 value="includeAbuseId" complete=true
+        |   0x0197f138      deddfe97       bl 0x19368b0
+        |   0x0197f140      e20380d2       mov x2, 0x1f
+        |   0x0197f148      638442f9       ldr x3, [x3, 0x508]    PP+0x2e508 target.kind:    string | target.name:    "includeAbuseState" | ref=34477 kind=string cid=94 value="includeAbuseState" complete=true
+        |   0x0197f14c      d9ddfe97       bl 0x19368b0
+        |   0x0197f154      020480d2       mov x2, 0x20
+        |   0x0197f15c      638842f9       ldr x3, [x3, 0x510]    PP+0x2e510 target.kind:    string | target.name:    "includeInvitedStudentUser" | ref=18387 kind=string cid=94 value="includeInvitedStudentUser" complete=true
+        |   0x0197f160      d4ddfe97       bl 0x19368b0
+        |   0x0197f168      220480d2       mov x2, 0x21                ; '!'
+        |   0x0197f170      638c42f9       ldr x3, [x3, 0x518]    PP+0x2e518 target.kind:    string | target.name:    "includeInvitedTeacherUser" | ref=44661 kind=string cid=94 value="includeInvitedTeacherUser" complete=true
+        |   0x0197f174      cfddfe97       bl 0x19368b0
+        |   0x0197f17c      420480d2       mov x2, 0x22                ; '\"'
+        |   0x0197f184      639042f9       ldr x3, [x3, 0x520]    PP+0x2e520 target.kind:    string | target.name:    "includeAbuseDeletionTimestamp" | ref=32966 kind=string cid=94 value="includeAbuseDeletionTimestamp" complete=true
+        |   0x0197f188      caddfe97       bl 0x19368b0
+        |   0x0197f190      620480d2       mov x2, 0x23                ; '#'
+        |   0x0197f198      639442f9       ldr x3, [x3, 0x528]    PP+0x2e528 target.kind:    string | target.name:    "includeOwnerDomainType" | ref=5094 kind=string cid=94 value="includeOwnerDomainType" complete=true
+        |   0x0197f19c      c5ddfe97       bl 0x19368b0
+        |   0x0197f1a4      820480d2       mov x2, 0x24                ; '$'
+        |   0x0197f1ac      639842f9       ldr x3, [x3, 0x530]    PP+0x2e530 target.kind:    string | target.name:    "includeReorderingSortKey" | ref=42565 kind=string cid=94 value="includeReorderingSortKey" complete=true
+        |   0x0197f1b0      c0ddfe97       bl 0x19368b0
+        |   0x0197f1b8      35c3f897       bl 0x17afe8c
+        |   0x0197f1c0      33c3f897       bl 0x17afe8c
+        |   0x0197f1c8      31c3f897       bl 0x17afe8c
+        |   0x0197f1d0      2fc3f897       bl 0x17afe8c
+        |   0x0197f1e4      200580d2       mov x0, 0x29                ; ')'
+        |   0x0197f1ec      10a242f9       ldr x16, [x16, 0x540]    PP+0x2e540 target.kind:    string | target.name:    "courseFeatureFlagsReadMask" | ref=33265 kind=string cid=94 value="courseFeatureFlagsReadMask" complete=true
+        |   0x0197f1f8      10a642f9       ldr x16, [x16, 0x548]    PP+0x2e548 target.kind:    variable | ref=124935 kind=variable cid=58 complete=true
+        |   0x0197f204      54bcff97       bl 0x196e354
+        |   0x0197f20c      20c3f897       bl 0x17afe8c
+        |   0x0197f214      1ec3f897       bl 0x17afe8c
+        |   0x0197f228      800580d2       mov x0, 0x2c                ; ','
+        |   0x0197f230      10ae42f9       ldr x16, [x16, 0x558]    PP+0x2e558 target.kind:    string | target.name:    "videoCallInfoReadMask" | ref=35073 kind=string cid=94 value="videoCallInfoReadMask" complete=true
+        |   0x0197f23c      10b242f9       ldr x16, [x16, 0x560]    PP+0x2e560 target.kind:    variable | ref=124934 kind=variable cid=58 complete=true
+        |   0x0197f248      43bcff97       bl 0x196e354
+        |   0x0197f250      0fc3f897       bl 0x17afe8c
+        |   0x0197f258      0dc3f897       bl 0x17afe8c
+        |   0x0197f260      0bc3f897       bl 0x17afe8c
+        |   0x0197f274      000680d2       mov x0, 0x30                ; '0'
+        |   0x0197f27c      10ba42f9       ldr x16, [x16, 0x570]    PP+0x2e570 target.kind:    string | target.name:    "gradingSettingsReadMask" | ref=21741 kind=string cid=94 value="gradingSettingsReadMask" complete=true
+        |   0x0197f288      10be42f9       ldr x16, [x16, 0x578]    PP+0x2e578 target.kind:    variable | ref=124933 kind=variable cid=58 complete=true
+        |   0x0197f294      30bcff97       bl 0x196e354
+        |   0x0197f29c      fcc2f897       bl 0x17afe8c
+        |   0x0197f2a4      420680d2       mov x2, 0x32                ; '2'
+        |   0x0197f2ac      63c042f9       ldr x3, [x3, 0x580]    PP+0x2e580 target.kind:    string | target.name:    "includeAccessorType" | ref=16399 kind=string cid=94 value="includeAccessorType" complete=true
+        |   0x0197f2b0      80ddfe97       bl 0x19368b0
+        |   0x0197f2c4      600680d2       mov x0, 0x33                ; '3'
+        |   0x0197f2cc      10c642f9       ldr x16, [x16, 0x588]    PP+0x2e588 target.kind:    string | target.name:    "courseFeatureReadyStatesReadMask" | ref=18910 kind=string cid=94 value="courseFeatureReadyStatesReadMask" complete=true
+        |   0x0197f2d8      101242f9       ldr x16, [x16, 0x420]    PP+0x2e420 target.kind:    variable | ref=124938 kind=variable cid=58 complete=true
+        |   0x0197f2e4      1cbcff97       bl 0x196e354
+        |   0x0197f2ec      e8c2f897       bl 0x17afe8c
+        |   0x0197f2f4      e6c2f897       bl 0x17afe8c
+        |   0x0197f2fc      e4c2f897       bl 0x17afe8c
+        |   0x0197f304      e2c2f897       bl 0x17afe8c
+        |   0x0197f30c      e0c2f897       bl 0x17afe8c
+        |   0x0197f314      220780d2       mov x2, 0x39                ; '9'
+        |   0x0197f31c      63c842f9       ldr x3, [x3, 0x590]    PP+0x2e590 target.kind:    string | target.name:    "includeGradeLevels" | ref=11440 kind=string cid=94 value="includeGradeLevels" complete=true
+        |   0x0197f320      64ddfe97       bl 0x19368b0
+        |   0x0197f328      d9c2f897       bl 0x17afe8c
+        |   0x0197f330      d7c2f897       bl 0x17afe8c
+        |   0x0197f338      d5c2f897       bl 0x17afe8c
+
+### CourseFilterOptions
+
+        |   0x0197b970      09251394       bl 0x1e44d94
+        |   0x0197b984      de6341f9       ldr x30, [x30, 0x2c0]    PP+0x162c0 target.kind:    variable | ref=124887 kind=variable cid=58 complete=true
+        |   0x0197b994      426441f9       ldr x2, [x2, 0x2c8]    PP+0x162c8 target.kind:    string | target.name:    "CourseFilterOptions" | ref=48943 kind=string cid=94 value="CourseFilterOptions" complete=true
+        |   0x0197b9a0      fb79f797       bl 0x175a18c
+        |   0x0197b9b4      200080d2       mov x0, 1
+        |   0x0197b9bc      104a41f9       ldr x16, [x16, 0x290]    PP+0x16290 target.kind:    string | target.name:    "baseFilterOptions" | ref=6615 kind=string cid=94 value="baseFilterOptions" complete=true
+        |   0x0197b9c8      100e41f9       ldr x16, [x16, 0x218]    PP+0x16218 target.kind:    variable | ref=124886 kind=variable cid=58 complete=true
+        |   0x0197b9d4      60caff97       bl 0x196e354
+        |   0x0197b9e8      400080d2       mov x0, 2
+        |   0x0197b9f0      106e44f9       ldr x16, [x16, 0x8d8]    PP+0xb8d8 target.kind:    string | target.name:    "courseId" | ref=26789 kind=string cid=94 value="courseId" complete=true
+        |   0x0197b9fc      105a41f9       ldr x16, [x16, 0x2b0]    PP+0x162b0 target.kind:    variable | ref=124806 kind=variable cid=58 complete=true
+        |   0x0197ba08      71ccff97       bl 0x196ebcc
+        |   0x0197ba1c      600080d2       mov x0, 3
+        |   0x0197ba24      106a41f9       ldr x16, [x16, 0x2d0]    PP+0x162d0 target.kind:    string | target.name:    "latestEnrollmentEvent" | ref=37885 kind=string cid=94 value="latestEnrollmentEvent" complete=true
+        |   0x0197ba3c      a5d4ff97       bl 0x1970cd0
+        |   0x0197ba50      800080d2       mov x0, 4
+        |   0x0197ba58      107241f9       ldr x16, [x16, 0x2e0]    PP+0x162e0 target.kind:    string | target.name:    "courseState" | ref=48208 kind=string cid=94 value="courseState" complete=true
+        |   0x0197ba70      98d4ff97       bl 0x1970cd0
+        |   0x0197ba78      05d1f897       bl 0x17afe8c
+        |   0x0197ba8c      e00080d2       mov x0, 7
+        |   0x0197ba94      107a41f9       ldr x16, [x16, 0x2f0]    PP+0x162f0 target.kind:    string | target.name:    "courseReadyState" | ref=27304 kind=string cid=94 value="courseReadyState" complete=true
+        |   0x0197baac      89d4ff97       bl 0x1970cd0
+        |   0x0197bab4      f6d0f897       bl 0x17afe8c
+
+### FilterOptions
+
+       .--> 0x0197b7f4      68251394       bl 0x1e44d94
+       :|   0x0197b808      de0f41f9       ldr x30, [x30, 0x218]    PP+0x16218 target.kind:    variable | ref=124886 kind=variable cid=58 complete=true
+       :|   0x0197b818      421041f9       ldr x2, [x2, 0x220]    PP+0x16220 target.kind:    string | target.name:    "FilterOptions" | ref=40748 kind=string cid=94 value="FilterOptions" complete=true
+       :|   0x0197b824      5a7af797       bl 0x175a18c
+       :|   0x0197b82c      98d1f897       bl 0x17afe8c
+       :|   0x0197b840      400080d2       mov x0, 2
+       :|   0x0197b848      101641f9       ldr x16, [x16, 0x228]    PP+0x16228 target.kind:    string | target.name:    "userFilter" | ref=46749 kind=string cid=94 value="userFilter" complete=true
+       :|   0x0197b854      101a41f9       ldr x16, [x16, 0x230]    PP+0x16230 target.kind:    variable | ref=124885 kind=variable cid=58 complete=true
+       :|   0x0197b860      dbccff97       bl 0x196ebcc
+       :|   0x0197b874      600080d2       mov x0, 3
+       :|   0x0197b87c      101e41f9       ldr x16, [x16, 0x238]    PP+0x16238 target.kind:    string | target.name:    "allowedStatus" | ref=21786 kind=string cid=94 value="allowedStatus" complete=true
+       :|   0x0197b894      0fd5ff97       bl 0x1970cd0
+       :|   0x0197b89c      7cd1f897       bl 0x17afe8c
+
+### UserFilter
+
+       .--> 0x0197bb5c      8e241394       bl 0x1e44d94
+       :|   0x0197bb70      de1b41f9       ldr x30, [x30, 0x230]    PP+0x16230 target.kind:    variable | ref=124885 kind=variable cid=58 complete=true
+       :|   0x0197bb80      422c41f9       ldr x2, [x2, 0x258]    PP+0x16258 target.kind:    string | target.name:    "UserFilter" | ref=28052 kind=string cid=94 value="UserFilter" complete=true
+       :|   0x0197bb8c      8079f797       bl 0x175a18c
+       :|   0x0197bb94      220080d2       mov x2, 1
+       :|   0x0197bb9c      633041f9       ldr x3, [x3, 0x260]    PP+0x16260 target.kind:    string | target.name:    "useCurrentUser" | ref=5097 kind=string cid=94 value="useCurrentUser" complete=true
+       :|   0x0197bba0      44ebfe97       bl 0x19368b0
+       :|   0x0197bbb4      400080d2       mov x0, 2
+       :|   0x0197bbbc      101a41f9       ldr x16, [x16, 0x230]    PP+0xe230 target.kind:    string | target.name:    "userId" | ref=52385 kind=string cid=94 value="userId" complete=true
+       :|   0x0197bbc8      103641f9       ldr x16, [x16, 0x268]    PP+0x16268 target.kind:    variable | ref=124813 kind=variable cid=58 complete=true
+       :|   0x0197bbd4      e0c9ff97       bl 0x196e354
+       :|   0x0197bbdc      acd0f897       bl 0x17afe8c
+
+### QuerySubmissionRequest
+
+       .--> 0x0197ea10      e1181394       bl 0x1e44d94
+       :|   0x0197ea24      de9346f9       ldr x30, [x30, 0xd20]    PP+0x30d20 target.kind:    variable | ref=124928 kind=variable cid=58 complete=true
+       :|   0x0197ea34      429446f9       ldr x2, [x2, 0xd28]    PP+0x30d28 target.kind:    string | target.name:    "QuerySubmissionRequest" | ref=7490 kind=string cid=94 value="QuerySubmissionRequest" complete=true
+       :|   0x0197ea40      d36df797       bl 0x175a18c
+       :|   0x0197ea48      11c5f897       bl 0x17afe8c
+       :|   0x0197ea5c      400080d2       mov x0, 2
+       :|   0x0197ea64      109e46f9       ldr x16, [x16, 0xd38]    PP+0x30d38 target.kind:    string | target.name:    "submissionReadMask" | ref=48697 kind=string cid=94 value="submissionReadMask" complete=true
+       :|   0x0197ea70      101a43f9       ldr x16, [x16, 0x630]    PP+0x2e630 target.kind:    variable | ref=124929 kind=variable cid=58 complete=true
+       :|   0x0197ea7c      36beff97       bl 0x196e354
+       :|   0x0197ea90      600080d2       mov x0, 3
+       :|   0x0197ea98      10e645f9       ldr x16, [x16, 0xbc8]    PP+0x2ebc8 target.kind:    string | target.name:    "filterOptions" | ref=15638 kind=string cid=94 value="filterOptions" complete=true
+       :|   0x0197eaa4      105241f9       ldr x16, [x16, 0x2a0]    PP+0x162a0 target.kind:    variable | ref=124890 kind=variable cid=58 complete=true
+       :|   0x0197eab0      29beff97       bl 0x196e354
+       :|   0x0197eab8      820080d2       mov x2, 4
+       :|   0x0197eac0      63a446f9       ldr x3, [x3, 0xd48]    PP+0x30d48 target.kind:    string | target.name:    "createIfNeeded" | ref=29655 kind=string cid=94 value="createIfNeeded" complete=true
+       :|   0x0197eac4      7bdffe97       bl 0x19368b0
+
+### QuerySubmissionResponse
+
+       .--> 0x0197eb98      bb6c1594       bl 0x1ed9e84
+       :|   0x0197eba4      00f845f9       ldr x0, [x0, 0xbf0]    PP+0x30bf0 target.kind:    string | target.name:    "hrq.sub" | ref=622 kind=string cid=94 value="hrq.sub" complete=true
+       :|   0x0197ebb0      79181394       bl 0x1e44d94
+       :|   0x0197ebc4      deff45f9       ldr x30, [x30, 0xbf8]    PP+0x30bf8 target.kind:    variable | ref=124930 kind=variable cid=58 complete=true
+       :|   0x0197ebdc      420046f9       ldr x2, [x2, 0xc00]    PP+0x30c00 target.kind:    string | target.name:    "QuerySubmissionResponse" | ref=42639 kind=string cid=94 value="QuerySubmissionResponse" complete=true
+       :|   0x0197ebe8      696df797       bl 0x175a18c
+       :|   0x0197ebf0      a7c4f897       bl 0x17afe8c
+       :|   0x0197ec04      400080d2       mov x0, 2
+       :|   0x0197ec0c      100646f9       ldr x16, [x16, 0xc08]    PP+0x30c08 target.kind:    string | target.name:    "submission" | ref=31382 kind=string cid=94 value="submission" complete=true
+       :|   0x0197ec18      100a46f9       ldr x16, [x16, 0xc10]    PP+0x30c10 target.kind:    variable | ref=124867 kind=variable cid=58 complete=true
+       :|   0x0197ec24      eabfff97       bl 0x196ebcc
+
+### StreamItemQueryRequest
+
+       .--> 0x01986520      1dfa1294       bl 0x1e44d94
+       :|   0x01986534      de8741f9       ldr x30, [x30, 0x308]    PP+0x34308 target.kind:    variable | ref=125010 kind=variable cid=58 complete=true
+       :|   0x01986544      428841f9       ldr x2, [x2, 0x310]    PP+0x34310 target.kind:    string | target.name:    "StreamItemQueryRequest" | ref=25144 kind=string cid=94 value="StreamItemQueryRequest" complete=true
+       :|   0x01986550      0f4ff797       bl 0x175a18c
+       :|   0x01986558      4da6f897       bl 0x17afe8c
+       :|   0x0198656c      400080d2       mov x0, 2
+       :|   0x01986574      10e242f9       ldr x16, [x16, 0x5c0]    PP+0x165c0 target.kind:    string | target.name:    "readMask" | ref=9010 kind=string cid=94 value="readMask" complete=true
+       :|   0x01986580      105641f9       ldr x16, [x16, 0x2a8]    PP+0x342a8 target.kind:    variable | ref=124800 kind=variable cid=58 complete=true
+       :|   0x0198658c      729fff97       bl 0x196e354
+       :|   0x019865a0      600080d2       mov x0, 3
+       :|   0x019865a8      10e642f9       ldr x16, [x16, 0x5c8]    PP+0x165c8 target.kind:    string | target.name:    "filter" | ref=12555 kind=string cid=94 value="filter" complete=true
+       :|   0x019865b4      103241f9       ldr x16, [x16, 0x260]    PP+0x34260 target.kind:    variable | ref=125008 kind=variable cid=58 complete=true
+       :|   0x019865c0      83a1ff97       bl 0x196ebcc
+       :|   0x019865c8      31a6f897       bl 0x17afe8c
+
+### StreamItemQueryResponse
+
+       .--> 0x01986670      054e1594       bl 0x1ed9e84
+       :|   0x0198667c      00a040f9       ldr x0, [x0, 0x140]    PP+0x34140 target.kind:    string | target.name:    "hrsi.qr" | ref=1800 kind=string cid=94 value="hrsi.qr" complete=true
+       :|   0x01986688      c3f91294       bl 0x1e44d94
+       :|   0x0198669c      dea740f9       ldr x30, [x30, 0x148]    PP+0x34148 target.kind:    variable | ref=125011 kind=variable cid=58 complete=true
+       :|   0x019866b4      42a840f9       ldr x2, [x2, 0x150]    PP+0x34150 target.kind:    string | target.name:    "StreamItemQueryResponse" | ref=47864 kind=string cid=94 value="StreamItemQueryResponse" complete=true
+       :|   0x019866c0      b34ef797       bl 0x175a18c
+       :|   0x019866c8      f1a5f897       bl 0x17afe8c
+       :|   0x019866dc      400080d2       mov x0, 2
+       :|   0x019866e4      10ae40f9       ldr x16, [x16, 0x158]    PP+0x34158 target.kind:    string | target.name:    "streamItem" | ref=15197 kind=string cid=94 value="streamItem" complete=true
+       :|   0x019866f0      10b240f9       ldr x16, [x16, 0x160]    PP+0x34160 target.kind:    variable | ref=124803 kind=variable cid=58 complete=true
+       :|   0x019866fc      34a1ff97       bl 0x196ebcc

@@ -1,0 +1,48 @@
+[package]
+name = "classroom-rust"
+version = "0.1.0"
+edition = "2024"
+publish = false
+default-run = "classroom-rust"
+
+[features]
+desktop = ["dep:block2", "dep:chrono", "dep:iced", "dep:image", "dep:objc2", "dep:objc2-foundation", "dep:png", "dep:rusqlite", "dep:serde", "dep:serde_json", "dep:tempfile", "dep:zeroize"]
+
+[[bin]]
+name = "classroom-desktop"
+path = "src/bin/classroom-desktop.rs"
+required-features = ["desktop"]
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
+form_urlencoded = "1"
+iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "svg", "tokio", "image-without-codecs"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
+png = { version = "0.17", optional = true }
+ring = "0.17"
+prost = "0.14"
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "process", "time"] }
+tonic = { version = "0.14", features = ["tls-ring", "tls-webpki-roots"] }
+tonic-prost = "0.14"
+zeroize = { version = "1", optional = true }
+
+[build-dependencies]
+tonic-prost-build = "0.14"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { version = "0.5.1", optional = true }
+objc2 = { version = "0.5.3", optional = true }
+objc2-foundation = { version = "0.2.2", features = ["NSDictionary", "NSString", "NSURL", "NSValue"], optional = true }
+tempfile = { version = "3.27", optional = true }
+
+[dev-dependencies]
+tokio-stream = { version = "0.1", features = ["net"] }
+
+[profile.release]
+opt-level = 2
+debug = 0
+strip = false

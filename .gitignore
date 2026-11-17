@@ -1,0 +1,13 @@
+/target/
+/work/
+*.app/
+*.log
+.DS_Store
+__pycache__/
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+/google-probe.txt

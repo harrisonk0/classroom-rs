@@ -1,0 +1,38 @@
+Allowed string references in the ARM64 Dart code
+0x0166a924 'scopes'
+0x0166a948 'https://www.googleapis.com/auth/drive'
+0x0166a948 'https://www.googleapis.com/auth/homeroom'
+0x0166a948 'https://www.googleapis.com/auth/plus.peopleapi.readwrite'
+0x0166a9ec 'plugins.flutter.io/sso_auth'
+0x0166b344 'plugins.flutter.io/sso_auth'
+0x0166b4e8 'plugins.flutter.io/sso_auth'
+0x019a504c 'plugins.flutter.io/sso_auth'
+0x01dd5c70 'x-goog-ext-525005006-bin'
+0x01dd5d30 'x-goog-ext-244371700-bin'
+0x01dd5f50 'classroomRoutingInfo'
+0x01dd5f98 'x-goog-ext-53200201-bin'
+0x01dd6060 'compass.RoutingInfo'
+0x01dd6068 'classroomRoutingInfo'
+0x01de0f3c 'x-goog-api-client'
+0x01de29f8 'plugins.flutter.io/sso_auth'
+0x01e28728 'plugins.flutter.io/sso_auth'
+0x01e2887c 'plugins.flutter.io/sso_auth'
+0x01e28acc 'Authorization'
+0x01e28ae4 'Bearer '
+0x01e28b2c 'X-Goog-AuthUser'
+0x01e29318 'plugins.flutter.io/sso_auth'
+0x01e31800 'plugins.flutter.io/sso_auth'
+0x01e3194c 'plugins.flutter.io/sso_auth'
+0x01e31ce8 'plugins.flutter.io/sso_auth'
+0x01ebcf50 'classroomRoutingInfo'
+0x01edb1ac 'plugins.flutter.io/sso_auth'
+0x01f1ac0c 'https://www.googleapis.com/auth/drive'
+0x01f1ac0c 'https://www.googleapis.com/auth/homeroom'
+0x01f1ac0c 'https://www.googleapis.com/auth/plus.peopleapi.readwrite'
+0x01f24250 'plugins.flutter.io/sso_auth'
+
+Bounded attestation and token-binding marker scan
+No matching markers in the carved Dart string inventory.
+work/static/apktool/smali_classes2/bwy.smali:1973 DROIDGUARD
+work/static/apktool/smali_classes2/bwy.smali:1985 Droidguard
+This scan cannot rule out checks in Google Play Services or Google's servers.

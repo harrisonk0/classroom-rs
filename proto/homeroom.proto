@@ -1,0 +1,163 @@
+// Partial wire-compatible schema recovered from Classroom 3.70.1008934421.
+// Opaque length-delimited fields below contain serialized nested protobufs.
+// Names follow the snapshot; unknown layouts and field behavior remain open.
+syntax = "proto2";
+
+package homeroom.dataservice;
+
+service HomeroomDataService {
+  rpc QueryCourse (QueryCourseRequest) returns (QueryCourseResponse);
+  rpc QueryStreamItem (StreamItemQueryRequest) returns (StreamItemQueryResponse);
+  rpc QuerySubmission (QuerySubmissionRequest) returns (QuerySubmissionResponse);
+}
+
+message QueryCourseRequest {
+  optional CourseReadMask course_read_mask = 2;
+  optional CourseFilterOptions filter_options = 3;
+}
+
+message CourseReadMask {
+  optional bool include_creation_timestamp = 1;
+  optional bool include_title = 5;
+  optional bool include_owner_user_id = 6;
+  optional bool include_student_user_id = 7;
+  optional bool include_subtitle = 8;
+  optional CourseSettingReadMask course_setting_read_mask = 9;
+  optional bool include_description = 11;
+  optional bool include_room = 14;
+  optional bool include_invited_student_user_id = 15;
+  optional bool include_muted_user_id = 18;
+  optional CourseUserSettingReadMask current_user_setting_read_mask = 21;
+  optional bool include_course_state = 22;
+  optional bool include_teacher_user_id = 23;
+  optional bool include_calendar_url = 25;
+  optional bool include_reordering_sort_key = 36;
+  optional VideoCallInfoReadMask video_call_info_read_mask = 44;
+}
+
+message CourseFilterOptions {
+  optional FilterOptions base_filter_options = 1;
+  repeated CourseId course_id = 2;
+  repeated int32 latest_enrollment_event = 3;
+}
+
+message FilterOptions {
+  repeated UserFilter user_filter = 2;
+}
+
+message UserFilter {
+  optional bool use_current_user = 1;
+}
+
+message QueryCourseResponse {
+  repeated Course course = 2;
+}
+
+message Course {
+  optional CourseId course_id = 1;
+  optional int64 creation_timestamp = 2;
+  optional string title = 6;
+  repeated bytes owner_user_id = 7; // Serialized UserId.
+  repeated bytes student_user_id = 8; // Serialized UserId; read only on explicit People request.
+  optional string subtitle = 9;
+  optional CourseSetting course_setting = 10;
+  optional string description = 12;
+  optional string room = 15;
+  repeated bytes invited_student_user_id = 16;
+  repeated bytes muted_user_id = 19;
+  optional CourseUserSetting current_user_setting = 20;
+  optional int32 course_state = 21;
+  repeated bytes teacher_user_id = 22; // Serialized UserId.
+  optional string calendar_url = 24;
+  optional bytes reordering_sort_key = 35;
+  optional VideoCallInfo video_call_info = 43;
+}
+
+message CourseUserSetting {
+  optional bool notifications_muted = 6;
+  optional CourseVisibilitySetting course_visibility_setting = 8;
+}
+message CourseUserSettingReadMask {
+  optional bool include_notifications_muted = 3;
+  optional bool include_course_visibility_setting = 5;
+}
+enum CourseVisibilitySetting {
+  COURSE_VISIBILITY_SETTING_UNSPECIFIED = 0;
+  VISIBLE = 1;
+  HIDDEN_BY_USER = 2;
+}
+
+message VideoCallInfo {
+  optional int32 video_call_url_state = 1;
+  optional string video_call_url = 2;
+  optional int32 video_call_url_type = 4;
+}
+
+message VideoCallInfoReadMask {
+  optional bool include_video_call_url_state = 1;
+  optional bool include_video_call_url = 2;
+  optional bool include_video_call_url_type = 4;
+}
+
+// Theme layout recovered from the signed Android snapshot, see feature-parity.md.
+message CourseSetting {
+  optional int32 student_stream_posting_policy = 5;
+  optional CourseThemeSetting course_theme_setting = 8;
+  optional int32 classwork_in_stream_display_type = 13;
+}
+message CourseSettingReadMask {
+  optional bool include_student_stream_posting_policy = 4;
+  optional CourseThemeSettingReadMask course_theme_setting_read_mask = 7;
+  optional bool include_classwork_in_stream_display_type = 12;
+}
+message CourseThemeSetting {
+  repeated string color = 2;
+  optional int32 photo_render_mode = 3;
+  optional string secure_photo_url = 6;
+  optional string secure_photo_url_gm3 = 9;
+  repeated string color_gm3 = 10;
+  optional bool use_gm3_stock_theme = 11;
+  optional string secure_photo_url_gm3_dark = 12;
+}
+message CourseThemeSettingReadMask {
+  optional bool include_color = 1;
+  optional bool include_photo_render_mode = 2;
+  optional bool include_secure_photo_url = 3;
+  optional bool include_secure_photo_url_gm3 = 4;
+  optional bool include_color_gm3 = 5;
+  optional bool include_use_gm3_stock_theme = 6;
+}
+
+message CourseId {
+  optional int64 id = 1;
+}
+
+message ReorderCourseRequest {
+  optional CourseId moved_course_id = 1;
+  optional CourseId before_id = 2;
+  optional CourseId after_id = 3;
+  optional CourseReadMask read_mask = 4;
+}
+message ReorderCourseResponse {
+  optional Course moved_course = 1;
+}
+
+message StreamItemQueryRequest {
+  optional bytes read_mask = 2;
+  repeated bytes filter = 3;
+}
+
+message StreamItemQueryResponse {
+  repeated bytes stream_item = 2;
+}
+
+message QuerySubmissionRequest {
+  optional bytes submission_read_mask = 2;
+  optional bytes filter_options = 3;
+  // The app also defines a create_if_needed boolean at field 4.
+  // Field 4 is deliberately omitted from this read-only binding.
+}
+
+message QuerySubmissionResponse {
+  repeated bytes submission = 2;
+}

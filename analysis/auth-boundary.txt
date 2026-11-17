@@ -1,0 +1,3 @@
+course, no credential: gRPC Unauthenticated; ErrorInfo=CREDENTIALS_MISSING; Bearer challenge=true
+course, invalid placeholder: gRPC Unauthenticated; ErrorInfo=unavailable; Bearer challenge=true
+nonexistent read control, no credential: gRPC Unimplemented; ErrorInfo=unavailable; Bearer challenge=false

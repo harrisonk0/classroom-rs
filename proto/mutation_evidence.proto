@@ -1,0 +1,225 @@
+// Offline wire evidence from Classroom Android 3.70.1008934421.
+// No service declarations or authorization/operation rules are implied.
+syntax = "proto2";
+package homeroom.mutation_evidence;
+
+import "classwork_evidence.proto";
+
+message WriteRequestHeader {
+  // 1 UNKNOWN, 2 INSERT, 3 UPDATE, 4 DELETE.
+  optional int32 operation = 1;
+}
+
+message WriteUserRequest {
+  optional WriteRequestHeader request_header = 1;
+  repeated UserMutation user_mutation = 2;
+  optional homeroom.classwork_evidence.UserReadMask user_read_mask = 3;
+  optional string locale = 4;
+}
+message UserMutation {
+  optional homeroom.classwork_evidence.UserId user_id = 1;
+  optional homeroom.classwork_evidence.User user = 2;
+  optional UserUpdateMask user_update_mask = 3;
+}
+message UserUpdateMask {
+  optional UserSettingUpdateMask user_setting_update_mask = 1;
+}
+message UserSettingUpdateMask {
+  optional bool update_receive_email_notifications = 1;
+  optional UserNotificationCategoryUpdateMask user_notification_category_update_mask = 8;
+}
+message UserNotificationCategoryUpdateMask {
+  optional UserNotificationGroupUpdateMask user_notification_group_update_mask = 1;
+}
+message UserNotificationGroupUpdateMask {
+  optional bool update_receive_email_notifications = 1;
+}
+
+message WriteSubmissionRequest {
+  optional WriteRequestHeader request_header = 1;
+  repeated SubmissionMutation submission_mutation = 2;
+  optional homeroom.classwork_evidence.SubmissionReadMask submission_read_mask = 3;
+}
+message SubmissionMutation {
+  optional homeroom.classwork_evidence.SubmissionId submission_id = 1;
+  optional homeroom.classwork_evidence.Submission submission = 2;
+  optional SubmissionUpdateMask submission_update_mask = 3;
+  repeated bytes add_materials = 4; // Nested records, deliberately opaque.
+}
+message SubmissionUpdateMask {
+  optional bool update_current_state = 1;
+  optional bool update_live_grade_numerator = 3;
+  optional bool update_draft_grade_numerator = 4;
+  optional AssignmentSubmissionUpdateMask assignment_submission_mask = 7;
+  optional QuestionSubmissionUpdateMask question_submission_mask = 8;
+}
+message QuestionSubmissionUpdateMask {
+  optional bool update_answer = 1;
+}
+message AssignmentSubmissionUpdateMask {
+  // APPEND=2, REMOVE=3, REPLACE_ALL=4. The app only sends REMOVE here.
+  optional int32 update_material = 1;
+}
+message WriteSubmissionResponse {
+  repeated homeroom.classwork_evidence.Submission submission = 1;
+}
+
+message WriteCommentRequest {
+  optional WriteRequestHeader request_header = 1;
+  repeated CommentMutation comment_mutation = 2;
+  optional homeroom.classwork_evidence.CommentReadMask comment_read_mask = 3;
+}
+message CommentMutation {
+  optional homeroom.classwork_evidence.CommentId comment_id = 1;
+  optional homeroom.classwork_evidence.Comment comment = 2;
+  optional CommentUpdateMask comment_update_mask = 3;
+}
+message CommentUpdateMask {
+  optional bool update_comment = 1;
+}
+message WriteCommentResponse {
+  repeated homeroom.classwork_evidence.Comment comment = 1;
+}
+
+message AddUserToCourseRequest {
+  optional homeroom.classwork_evidence.CourseId course_id = 1;
+  optional string enrollment_code = 2;
+  optional homeroom.classwork_evidence.UserId user_id = 3;
+  // Confirmed enum from pool 0x33880: 1 UNKNOWN, 2 TEACHER, 3 STUDENT.
+  optional int32 course_role = 4;
+  optional homeroom.classwork_evidence.CourseUserReadMask read_mask = 5;
+}
+message AddUserToCourseResponse {
+  optional homeroom.classwork_evidence.CourseUser course_user = 1;
+}
+message CourseInvitationId {
+  optional homeroom.classwork_evidence.CourseId course_id = 1;
+  optional int64 id = 2; // The Android course card passes the invitee's user ID.
+}
+message DeleteCourseInvitationRequest {
+  optional CourseInvitationId course_invitation_id = 1;
+  optional InvitedRole invited_role = 2;
+}
+enum InvitedRole {
+  INVITED_ROLE_UNSPECIFIED = 0;
+  TEACHER = 1;
+  STUDENT = 2;
+}
+message RemoveUserFromCourseRequest {
+  optional homeroom.classwork_evidence.CourseId course_id = 1;
+  optional homeroom.classwork_evidence.UserId user_id = 2;
+  optional int32 course_role = 3;
+}
+message RemoveUserFromCourseResponse {}
+message UpdateCourseUserRequest {
+  optional homeroom.classwork_evidence.CourseUser course_user = 1;
+  optional CourseUserUpdateMask update_mask = 2;
+  optional homeroom.classwork_evidence.CourseUserReadMask read_mask = 3;
+}
+message CourseUserUpdateMask {
+  optional bool update_is_muted = 1;
+  optional CourseUserSettingUpdateMask course_user_setting_update_mask = 2;
+}
+message CourseUserSettingUpdateMask {
+  optional bool update_notifications_muted = 3;
+  optional bool update_course_visibility_setting = 5;
+}
+
+message WriteCourseRequest {
+  optional WriteRequestHeader request_header = 1;
+  repeated CourseMutation course_mutation = 2;
+  optional bytes course_read_mask = 3; // Nested CourseReadMask.
+}
+message CourseMutation {
+  optional homeroom.classwork_evidence.CourseId course_id = 1;
+  optional bytes course = 2; // Nested Course.
+  optional bytes course_update_mask = 3;
+  optional string enrollment_code = 4;
+}
+message WriteCourseResponse {
+  repeated bytes course = 1; // Nested Course.
+}
+
+message TopicInsertRequest {
+  optional homeroom.classwork_evidence.Topic topic = 1;
+  optional homeroom.classwork_evidence.TopicReadMask read_mask = 2;
+}
+message TopicUpdateRequest {
+  optional homeroom.classwork_evidence.Topic topic = 1;
+  optional TopicUpdateMask update_mask = 2;
+  optional homeroom.classwork_evidence.TopicReadMask read_mask = 3;
+}
+message TopicUpdateMask {
+  optional bool update_name = 1;
+}
+message TopicDeleteRequest {
+  optional homeroom.classwork_evidence.TopicId topic_id = 1;
+}
+message TopicDeleteResponse {
+  optional homeroom.classwork_evidence.TopicId topic_id = 1;
+}
+message CourseUpdateMask {
+  optional bool update_title = 1;
+  optional bool update_subtitle = 4;
+  optional CourseSettingUpdateMask course_setting_update_mask = 5;
+  optional bool update_description = 7;
+  optional bool update_room = 10;
+  optional CourseUserSettingUpdateMask current_user_setting_update_mask = 15;
+}
+message CourseSettingUpdateMask {
+  optional bool update_student_stream_posting_policy = 4;
+  optional bool update_classwork_in_stream_display_type = 9;
+}
+
+message StreamItemInsertRequest {
+  repeated homeroom.classwork_evidence.StreamItem stream_item = 1;
+  optional homeroom.classwork_evidence.StreamReadMask read_mask = 2;
+  optional int32 drive_item_error_strategy = 5;
+  repeated bytes student_groups_assignment = 9;
+}
+message StreamItemUpdateRequest {
+  repeated homeroom.classwork_evidence.StreamItem stream_item = 1;
+  optional StreamItemUpdateMask update_mask = 2;
+  optional homeroom.classwork_evidence.StreamReadMask read_mask = 3;
+  repeated bytes personalized_stream_item_mutation = 7;
+}
+message StreamItemUpdateMask {
+  optional AssignmentUpdateMask assignment_mask = 1;
+  optional PostUpdateMask post_mask = 2;
+  optional AssignmentUpdateMask question_mask = 3;
+  optional AssignmentUpdateMask supplement_mask = 6;
+}
+message AssignmentUpdateMask {
+  optional StreamItemInfoUpdateMask stream_item_info_mask = 1;
+  // AssignmentUpdateMask2 registers taskInfoMask at tag 2 (0x19855ec–0x198560c).
+  optional TaskInfoUpdateMask task_info_mask = 2;
+}
+message TaskInfoUpdateMask {
+  // AOT TaskInfoUpdateMask builder 0x1985e28–0x1985e50.
+  optional bool update_due_date = 1;
+  optional bool update_grade_denominator = 3;
+}
+message PostUpdateMask {
+  optional StreamItemInfoUpdateMask stream_item_info_mask = 1;
+}
+message StreamItemInfoUpdateMask {
+  optional bool update_title = 1;
+  optional bool update_description = 2;
+  optional PublicationInfoUpdateMask publication_info_mask = 4;
+  optional bool update_status = 6;
+  optional int32 update_topic_id = 7;
+}
+message PublicationInfoUpdateMask {
+  optional bool update_status = 1;
+  optional bool update_scheduled_timestamp = 3;
+}
+message StreamItemUpsertResponse {
+  repeated StreamItemUpsertResult result = 1;
+}
+message StreamItemUpsertResult {
+  optional StreamItemStatus status = 1;
+  optional homeroom.classwork_evidence.StreamItem stream_item = 2;
+}
+message StreamItemStatus {
+  optional int32 code = 1;
+}
