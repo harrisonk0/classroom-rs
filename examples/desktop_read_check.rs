@@ -647,6 +647,9 @@ async fn main() {
             }
         }
         println!("Classwork sort keys={total_keys}; fully keyed groups with >=2 posts={all_keyed}; mixed groups={mixed_keys}; display ascending={ascending}; descending={descending}");
+        let topic_ids = snapshot.topics.values().flatten().map(|topic| topic.id.as_str()).collect::<Vec<_>>();
+        let numerical = topic_ids.iter().filter(|id| id.parse::<i64>().is_ok_and(|id| id > 0)).count();
+        println!("Published topics with positive numeric IDs={numerical}/{}", topic_ids.len());
         if classes != ids.len() {
             std::process::exit(1);
         }

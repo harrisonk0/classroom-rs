@@ -994,6 +994,12 @@ fn check_class(course_id: i64) -> Result<(), String> {
 }
 
 pub async fn load_coursework(session: &LiveSession, course_id: i64) -> Result<CourseContents, String> {
+    let items = load_coursework_items(session, course_id).await?;
+    let topics = load_referenced_topics(session, course_id, &items).await;
+    Ok(CourseContents { items, topics })
+}
+
+async fn load_coursework_items(session: &LiveSession, course_id: i64) -> Result<Vec<Coursework>, String> {
     check_class(course_id)?;
     let response: wire::StreamItemQueryResponse = session.rpc(
         "QueryStreamItem", classwork_request(course_id), Some(course_id),
@@ -1010,12 +1016,15 @@ pub async fn load_coursework(session: &LiveSession, course_id: i64) -> Result<Co
     if count != 0 && items.is_empty() {
         return Err("Google returned items without readable IDs for this class.".into());
     }
-    let topics = if items.iter().any(|item| item.topic_id.is_some()) {
+    Ok(items)
+}
+
+async fn load_referenced_topics(session: &LiveSession, course_id: i64, items: &[Coursework]) -> Option<Vec<Topic>> {
+    if items.iter().any(|item| item.topic_id.is_some()) {
         load_topics(session, course_id).await.ok()
     } else {
         None
-    };
-    Ok(CourseContents { items, topics })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1031,15 +1040,20 @@ pub fn assignment_updates(
     stream::iter(courses).map(move |course_id| {
         let session = session.clone();
         async move {
-            let contents = load_coursework(&session, course_id).await.ok();
-            let submissions = if contents.as_ref().is_some_and(|result| {
-                result.items.iter().any(|item| matches!(item.kind, CourseworkKind::Assignment | CourseworkKind::Question))
-            }) {
-                load_submissions(&session, course_id).await.ok()
-            } else {
-                None
+            let Ok(items) = load_coursework_items(&session, course_id).await else {
+                return AssignmentRefresh { course_id, contents: None, submissions: None };
             };
-            AssignmentRefresh { course_id, contents, submissions }
+            let (topics, submissions) = tokio::join!(
+                load_referenced_topics(&session, course_id, &items),
+                async {
+                    if items.iter().any(|item| matches!(item.kind, CourseworkKind::Assignment | CourseworkKind::Question)) {
+                        load_submissions(&session, course_id).await.ok()
+                    } else {
+                        None
+                    }
+                },
+            );
+            AssignmentRefresh { course_id, contents: Some(CourseContents { items, topics }), submissions }
         }
     }).buffer_unordered(3)
 }
