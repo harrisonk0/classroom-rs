@@ -333,6 +333,7 @@ enum Message {
     ShowClassroomLink,
     EditClassroomLink(String),
     OpenClassroomLink,
+    ClassroomWorkLinkChecked(u64, ClassroomLink, Result<ClassroomLink, String>),
     CloseClassroomLink,
     CopyClassroomLink(ClassroomLink),
     OpenYourWork(i64),
@@ -641,6 +642,7 @@ impl fmt::Debug for Message {
             Self::ShowClassroomLink => "ShowClassroomLink",
             Self::EditClassroomLink(_) => "EditClassroomLink",
             Self::OpenClassroomLink => "OpenClassroomLink",
+            Self::ClassroomWorkLinkChecked(..) => "ClassroomWorkLinkChecked",
             Self::CloseClassroomLink => "CloseClassroomLink",
             Self::CopyClassroomLink(_) => "CopyClassroomLink",
             Self::OpenYourWork(_) => "OpenYourWork",
@@ -1500,6 +1502,8 @@ impl AssignmentBatch {
 struct App {
     screen: Screen,
     classroom_link_input: Option<String>,
+    classroom_link_generation: u64,
+    checking_classroom_link: bool,
     tab: Tab,
     sidebar: bool,
     search: String,
@@ -1650,6 +1654,8 @@ impl App {
         let mut app = Self {
             screen: Screen::Home,
             classroom_link_input: None,
+            classroom_link_generation: 0,
+            checking_classroom_link: false,
             tab: Tab::Stream,
             sidebar: true,
             search: String::new(),
@@ -1913,15 +1919,37 @@ impl App {
                 self.classroom_link_input.get_or_insert_with(String::new);
             }
             Message::EditClassroomLink(value) if value.len() <= 4096 && self.classroom_link_input.is_some() => {
+                self.invalidate_classroom_link_check();
                 self.classroom_link_input = Some(value);
             }
-            Message::CloseClassroomLink => self.classroom_link_input = None,
-            Message::OpenClassroomLink if !self.has_pending_request() && !self.verify_live_course_count => {
+            Message::CloseClassroomLink => {
+                self.invalidate_classroom_link_check();
+                self.classroom_link_input = None;
+            }
+            Message::OpenClassroomLink if !self.has_pending_request() && !self.verify_live_course_count
+                && !self.checking_classroom_link =>
+            {
                 if let Some(value) = &self.classroom_link_input {
                     if let Some(target) = ClassroomLink::parse(value) {
                         return self.open_classroom_link(target);
                     }
-                    self.error = Some("Paste a Classroom class, assignment or question link.".into());
+                    self.error = Some("Paste a supported classroom.google.com link.".into());
+                }
+            }
+            Message::ClassroomWorkLinkChecked(generation, target, result)
+                if self.checking_classroom_link && generation == self.classroom_link_generation =>
+            {
+                self.checking_classroom_link = false;
+                match result {
+                    Ok(own) if own == target && self.snapshot.as_ref().is_some_and(|snapshot|
+                        snapshot.courses.iter().any(|course| course.id == target.course())) =>
+                    {
+                        self.classroom_link_input = None;
+                        return self.update(Message::OpenYourWork(target.course()));
+                    }
+                    Ok(own) if own == target => self.error = Some("That class is no longer in the current course list.".into()),
+                    Ok(_) => self.error = Some("This Your work link belongs to another Classroom account.".into()),
+                    Err(error) => self.error = Some(error),
                 }
             }
             Message::CopyClassroomLink(target) => {
@@ -1935,6 +1963,7 @@ impl App {
             }
             Message::Navigate(screen) => {
                 if self.screen != screen {
+                    self.invalidate_classroom_link_check();
                     self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
                     self.comment_mentions = None;
                     if screen == Screen::CreateClass {
@@ -1990,6 +2019,7 @@ impl App {
                 self.queued_page_load = true;
             }
             Message::OpenYourWork(course_id) => {
+                self.invalidate_classroom_link_check();
                 self.screen = Screen::Course(course_id);
                 self.tab = Tab::YourWork;
                 self.overall_grades.remove(&course_id);
@@ -2372,6 +2402,7 @@ impl App {
                     return Task::none();
                 }
                 if self.tab != tab {
+                    self.invalidate_classroom_link_check();
                     self.drive_picker = None;
                     self.pending_student_mute = None;
                     self.topic_editor = None;
@@ -3990,6 +4021,7 @@ impl App {
                 }
             }
             Message::OpenItem(course, item) => {
+                self.invalidate_classroom_link_check();
                 self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
                 self.comment_mentions = None;
                 self.teacher_work = None;
@@ -5185,6 +5217,7 @@ impl App {
                 self.snapshot = None;
                 self.reset_personal_copy();
                 self.classroom_link_input = None;
+                self.invalidate_classroom_link_check();
                 self.show_hidden_classes = false;
                 self.open_course_menu = None;
                 self.move_course_menu = None;
@@ -5801,7 +5834,7 @@ impl App {
     }
 
     fn classroom_link_form<'a>(&'a self, value: &'a str) -> Element<'a, Message> {
-        let ready = !self.has_pending_request() && !value.trim().is_empty();
+        let ready = !self.has_pending_request() && !self.checking_classroom_link && !value.trim().is_empty();
         let input = text_input("Paste a classroom.google.com link", value).padding(9).width(Fill)
             .on_input(Message::EditClassroomLink).on_submit_maybe(ready.then_some(Message::OpenClassroomLink));
         container(column![
@@ -5809,10 +5842,16 @@ impl App {
             row![
                 input,
                 button("Cancel").style(quiet_style).padding([7, 9]).on_press(Message::CloseClassroomLink),
-                button("Open").style(primary_style).padding([8, 12])
+                button(if self.checking_classroom_link { "Checking account…" } else { "Open" })
+                    .style(primary_style).padding([8, 12])
                     .on_press_maybe(ready.then_some(Message::OpenClassroomLink)),
             ].spacing(8).align_y(Alignment::Center),
         ].spacing(8)).padding(12).style(|_| outline_surface(8.0)).into()
+    }
+
+    fn invalidate_classroom_link_check(&mut self) {
+        self.classroom_link_generation = self.classroom_link_generation.wrapping_add(1);
+        self.checking_classroom_link = false;
     }
 
     fn open_classroom_link(&mut self, target: ClassroomLink) -> Task<Message> {
@@ -5829,10 +5868,23 @@ impl App {
                 && snapshot.topics_for(course).is_none_or(|topics| !topics.iter().any(|entry| entry.id == topic.to_string())),
             _ => false,
         };
-        self.classroom_link_input = None;
+        if !matches!(target, ClassroomLink::YourWork { .. }) {
+            self.classroom_link_input = None;
+        }
         self.error = None;
         self.notice = None;
         match target {
+            ClassroomLink::YourWork { .. } => {
+                let Some(session) = self.session.clone().filter(|_| self.can_read_pages()) else {
+                    self.error = Some("Connect to Classroom to verify this Your work link.".into());
+                    return Task::none();
+                };
+                self.invalidate_classroom_link_check();
+                self.checking_classroom_link = true;
+                let generation = self.classroom_link_generation;
+                Task::perform(async move { desktop_auth::own_work_link(&session, course).await },
+                    move |result| Message::ClassroomWorkLinkChecked(generation, target, result))
+            }
             ClassroomLink::Course { classwork, .. } => {
                 let navigate = self.update(Message::Navigate(Screen::Course(course)));
                 Task::batch([navigate, self.update(Message::SetTab(if classwork { Tab::Classwork } else { Tab::Stream }))])
@@ -11076,6 +11128,36 @@ mod tests {
         app.loading_stream_access.insert(1);
         assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()),
             Some(PageRead::Detail(DetailRead::Comments(1, 42))));
+    }
+
+    #[test]
+    fn your_work_link_requires_matching_identity_and_ignores_cancelled_checks() {
+        let (mut app, snapshot) = fixture();
+        app.install_snapshot(snapshot);
+        let target = ClassroomLink::YourWork { course: 1, student: 14 };
+        let wrong = ClassroomLink::YourWork { course: 1, student: 13 };
+        let begin_check = |app: &mut App| {
+            app.classroom_link_input = target.web_url();
+            app.invalidate_classroom_link_check();
+            app.checking_classroom_link = true;
+            app.classroom_link_generation
+        };
+        let generation = begin_check(&mut app);
+        let _ = app.update(Message::ClassroomWorkLinkChecked(generation, target, Ok(wrong)));
+        assert_eq!(app.screen, Screen::Home);
+        assert!(app.classroom_link_input.is_some());
+        assert!(app.error.is_some());
+
+        let generation = begin_check(&mut app);
+        let _ = app.update(Message::CloseClassroomLink);
+        let _ = app.update(Message::ClassroomWorkLinkChecked(generation, target, Ok(target)));
+        assert_eq!(app.screen, Screen::Home);
+
+        let generation = begin_check(&mut app);
+        let _ = app.update(Message::ClassroomWorkLinkChecked(generation, target, Ok(target)));
+        assert_eq!(app.screen, Screen::Course(1));
+        assert_eq!(app.tab, Tab::YourWork);
+        assert!(app.classroom_link_input.is_none());
     }
 
     #[test]

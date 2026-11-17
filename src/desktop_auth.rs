@@ -1378,6 +1378,14 @@ pub async fn check_current_user(session: &LiveSession) -> Result<(), String> {
     current_user_id(session).await.map(|_| ())
 }
 
+pub async fn own_work_link(
+    session: &LiveSession, course: i64,
+) -> Result<crate::classroom_links::ClassroomLink, String> {
+    check_class(course)?;
+    let student = current_user_id(session).await?;
+    Ok(crate::classroom_links::ClassroomLink::YourWork { course, student })
+}
+
 async fn require_class_moderator(session: &LiveSession, course: i64) -> Result<(), String> {
     check_class(course)?;
     if !session.snapshot.courses.iter().any(|entry| entry.id == course && entry.state == CourseState::Active) {
