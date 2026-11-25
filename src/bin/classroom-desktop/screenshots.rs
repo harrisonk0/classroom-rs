@@ -6,7 +6,7 @@ pub(super) fn schedule_capture(shot: Shot) -> Task<Message> {
     Task::future(async { tokio::time::sleep(Duration::from_millis(425)).await })
         .then(move |()| window::latest().then(move |id| match id {
             Some(id) => window::screenshot(id)
-                .map(move |image| Message::ScreenshotReady(shot, image)),
+                .map(move |image| Message::ScreenshotReady(shot, Arc::new(image))),
             None => iced::exit(),
         }))
 }

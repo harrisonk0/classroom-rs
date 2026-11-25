@@ -28,7 +28,7 @@ impl App {
             let active = self.tab == tab || tab == Tab::Classwork && self.tab == Tab::YourWork;
             container(column![
                 button(text(tab.name()).size(15).font(medium())).padding([12, 18])
-                    .style(move |_, status| tab_style(active, status))
+                    .style(move |theme, status| tab_style(theme, active, status))
                     .on_press(Message::SetTab(tab)),
                 container(space().height(3)).width(Fill)
                     .style(move |_| surface(if active { BLUE } else { Color::TRANSPARENT }, 2.0)),

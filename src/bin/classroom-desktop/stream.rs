@@ -35,7 +35,7 @@ impl App {
         }
         if home_course(course) {
             let snapshot = self.snapshot.as_ref();
-            let work = snapshot.map_or_else(Vec::new, |data| data.upcoming_work(&Local::now(), Some(course.id), 5));
+            let work = snapshot.map_or_else(Vec::new, |data| data.upcoming_work(&self.now, Some(course.id), 5));
             let coursework_loaded = snapshot.is_some_and(|data| data.coursework_for(course.id).is_some());
             let mut upcoming = column![text("Upcoming").size(16).font(medium()).color(FG)].spacing(7).width(Fill);
             if coursework_loaded && work.is_empty() {
@@ -121,7 +121,7 @@ impl App {
             for policy in desktop_auth::StreamPostingPolicy::ALL {
                 let selected = editor.draft.stream.posting == Some(policy);
                 posting = posting.push(button(policy.label()).width(Fill).padding([8, 10])
-                    .style(move |_, status| nav_style(selected, status))
+                    .style(move |theme, status| nav_style(theme, selected, status))
                     .on_press_maybe((ready && editor.original.stream.posting.is_some()).then_some(Message::SetCoursePostingPolicy(policy))));
             }
             if editor.original.stream.posting.is_none() {
@@ -135,7 +135,7 @@ impl App {
             ] {
                 let selected = editor.draft.stream.classwork == Some(option);
                 display = display.push(button(label).width(Fill).padding([8, 10])
-                    .style(move |_, status| nav_style(selected, status))
+                    .style(move |theme, status| nav_style(theme, selected, status))
                     .on_press_maybe((ready && editor.original.stream.classwork.is_some()).then_some(Message::SetCourseStreamDisplay(option))));
             }
             if editor.original.stream.classwork.is_none() {
@@ -412,13 +412,18 @@ impl App {
                     let title = if display == Some(StreamClassworkDisplay::Hidden) { "No announcements yet" } else { "Nothing posted yet" };
                     section.push(empty_panel(Icon::Feed, title, "Class posts will appear here."))
                 } else {
-                    section.extend(visible.map(|item| {
+                    section.push(iced::widget::keyed_column(visible.map(|item| {
+                        use std::hash::{DefaultHasher, Hash, Hasher};
+                        let mut hasher = DefaultHasher::new();
+                        (course_id, &item.id).hash(&mut hasher);
+                        let card =
                         if item.kind == CourseworkKind::Announcement || display.is_none() {
                             self.stream_row(item)
                         } else {
                             self.stream_classwork_notice(item, display == Some(StreamClassworkDisplay::Expanded))
-                        }
-                    }))
+                        };
+                        (hasher.finish(), card)
+                    })).spacing(13).width(Fill))
                 }
             }
             None if self.can_read_pages() => section,

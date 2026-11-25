@@ -485,7 +485,7 @@ impl App {
         let active = self.selected_topic.as_deref() == topic;
         button(text(title).size(14).wrapping(text::Wrapping::WordOrGlyph)).padding([8, 12])
             .width(if sidebar { Fill } else { Length::Shrink })
-            .style(move |_, status| nav_style(active, status))
+            .style(move |theme, status| nav_style(theme, active, status))
             .on_press(Message::SelectTopic(topic.map(str::to_owned)))
             .into()
     }

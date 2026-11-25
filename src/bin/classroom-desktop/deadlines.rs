@@ -54,7 +54,7 @@ impl App {
     }
 
     pub(super) fn calendar(&self) -> Element<'_, Message> {
-        let today = Local::now().date_naive();
+        let today = self.now.date_naive();
         let monday = self.calendar_monday;
         let sunday = monday + Days::new(6);
         let span = if monday.year() != sunday.year() {
@@ -194,7 +194,7 @@ impl App {
     pub(super) fn todo(&self) -> Element<'_, Message> {
         let filters = row(TodoFilter::ALL.into_iter().map(|filter| {
             let active = self.todo_filter == filter;
-            button(filter.label()).padding([8, 12]).style(move |_, status| nav_style(active, status))
+            button(filter.label()).padding([8, 12]).style(move |theme, status| nav_style(theme, active, status))
                 .on_press(Message::SetTodoFilter(filter)).into()
         })).spacing(6);
         let toolbar = row![filters, self.class_filter_picker(self.todo_class, Message::FilterTodoClass)]
@@ -205,7 +205,7 @@ impl App {
         if let Some(status) = status {
             body = body.push(status);
         }
-        let groups = self.todo_items(Local::now().date_naive(), self.todo_filter);
+        let groups = self.todo_items(self.now.date_naive(), self.todo_filter);
         let standard = self.todo_filter.groups();
         let sections = standard.iter().copied().chain(groups.keys().copied().filter(|group| !standard.contains(group)));
         for group in sections {

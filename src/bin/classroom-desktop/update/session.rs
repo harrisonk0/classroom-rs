@@ -95,7 +95,7 @@ impl App {
                     self.refreshing = true;
                     self.error = None;
                     return Task::perform(
-                        async move { desktop_auth::refresh(&session).await },
+                        async move { desktop_auth::refresh(&session).await.map(Arc::new) },
                         Message::Refreshed,
                     );
                 }
@@ -103,7 +103,8 @@ impl App {
             Message::Refreshed(result) => {
                 self.refreshing = false;
                 match result {
-                    Ok(mut snapshot) => {
+                    Ok(snapshot) => {
+                        let mut snapshot = Arc::unwrap_or_clone(snapshot);
                         if let Some(previous) = &self.snapshot {
                             for course in &snapshot.courses {
                                 if let Some(items) = previous.coursework_for(course.id) {
@@ -143,9 +144,6 @@ impl App {
                     Err(error) => self.error = Some(error),
                 }
             }
-            Message::SaveOffline if !self.has_pending_request() => self.save_offline(),
-            Message::OpenOffline if !self.has_pending_request() => self.open_offline(),
-            Message::DeleteOffline if !self.has_pending_request() => self.delete_offline(),
             Message::Demo if !self.has_pending_request() => {
                 self.install_snapshot(Snapshot::demo());
                 self.reset_artwork();

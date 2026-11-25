@@ -128,20 +128,20 @@ pub(super) fn divider_style(theme: &Theme) -> rule::Style {
     rule::Style { color: BORDER, ..rule::default(theme) }
 }
 
-pub(super) fn quiet_style(_: &Theme, status: button::Status) -> button::Style {
+pub(super) fn quiet_style(theme: &Theme, status: button::Status) -> button::Style {
     button::Style {
         background: match status {
             button::Status::Hovered | button::Status::Pressed => Some(SOFT.into()),
             _ => None,
         },
-        text_color: if status == button::Status::Disabled { MUTED } else { FG },
+        text_color: if status == button::Status::Disabled { MUTED } else { theme.palette().text },
         border: border(Color::TRANSPARENT, 0.0, 7.0),
         ..Default::default()
     }
 }
 
-pub(super) fn nav_style(active: bool, status: button::Status) -> button::Style {
-    let mut style = quiet_style(&Theme::Light, status);
+pub(super) fn nav_style(theme: &Theme, active: bool, status: button::Status) -> button::Style {
+    let mut style = quiet_style(theme, status);
     style.border.radius = 23.0.into();
     if active {
         style.background = Some(ACTIVE_BG.into());
@@ -150,24 +150,24 @@ pub(super) fn nav_style(active: bool, status: button::Status) -> button::Style {
     style
 }
 
-pub(super) fn outline_style(_: &Theme, status: button::Status) -> button::Style {
-    let mut style = quiet_style(&Theme::Light, status);
+pub(super) fn outline_style(theme: &Theme, status: button::Status) -> button::Style {
+    let mut style = quiet_style(theme, status);
     style.text_color = if status == button::Status::Disabled { MUTED } else { ACTIVE_FG };
     style.border = border(BORDER, 1.0, 7.0);
     style
 }
 
-pub(super) fn tab_style(active: bool, status: button::Status) -> button::Style {
-    let mut style = quiet_style(&Theme::Light, status);
+pub(super) fn tab_style(theme: &Theme, active: bool, status: button::Status) -> button::Style {
+    let mut style = quiet_style(theme, status);
     style.text_color = if active { ACTIVE_FG } else { MUTED };
     style
 }
 
-pub(super) fn primary_style(_: &Theme, status: button::Status) -> button::Style {
+pub(super) fn primary_style(theme: &Theme, status: button::Status) -> button::Style {
     let background = match status {
         button::Status::Hovered | button::Status::Pressed => color!(0x1765cc),
         button::Status::Disabled => BORDER,
-        _ => BLUE,
+        _ => theme.palette().primary,
     };
     button::Style {
         background: Some(background.into()),
@@ -177,11 +177,11 @@ pub(super) fn primary_style(_: &Theme, status: button::Status) -> button::Style 
     }
 }
 
-pub(super) fn card_style(_: &Theme, status: button::Status) -> button::Style {
+pub(super) fn card_style(theme: &Theme, status: button::Status) -> button::Style {
     let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: Some(WHITE.into()),
-        text_color: FG,
+        background: Some(theme.palette().background.into()),
+        text_color: theme.palette().text,
         border: border(if hovered { color!(0xa1b9d9) } else { BORDER }, 1.0, 12.0),
         shadow: if hovered {
             Shadow { color: Color::BLACK.scale_alpha(0.10), offset: Vector::new(0.0, 3.0), blur_radius: 10.0 }

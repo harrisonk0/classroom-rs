@@ -13,6 +13,8 @@ mod item;
 mod loading;
 mod message;
 mod navigation;
+mod offline;
+use offline::OfflineMessage;
 mod people;
 mod rich_text;
 mod screenshots;
@@ -130,7 +132,12 @@ pub(super) fn run() -> iced::Result {
         move || App::boot(screenshot_directory.clone(), verify_live_course_count), App::update, App::view,
     )
         .title("Classroom for Mac")
-        .theme(Theme::Light)
+        .theme(Theme::custom("Classroom", iced::theme::Palette {
+            background: WHITE,
+            text: FG,
+            primary: BLUE,
+            ..iced::theme::Palette::LIGHT
+        }))
         .font(include_bytes!("../../../assets/fonts/GoogleSansFlex.ttf").as_slice())
         .default_font(CLASSROOM_FONT)
         .subscription(App::subscription)
@@ -334,6 +341,8 @@ impl AssignmentBatch {
 }
 
 struct App {
+    offline_pending: bool,
+    now: DateTime<Local>,
     screen: Screen,
     classroom_link_input: Option<String>,
     classroom_link_generation: u64,
@@ -494,6 +503,8 @@ impl App {
     fn boot(screenshot_directory: Option<PathBuf>, verify_live_course_count: bool) -> (Self, Task<Message>) {
         let synthetic = screenshot_directory.is_some();
         let mut app = Self {
+            offline_pending: false,
+            now: Local::now(),
             screen: Screen::Home,
             classroom_link_input: None,
             classroom_link_generation: 0,
@@ -691,7 +702,7 @@ impl App {
             | CaptureState::AskingCamera | CaptureState::RecordingCamera { .. } | CaptureState::RecordingScreen { .. })) {
             return true;
         }
-        self.busy || self.refreshing || self.changing_membership || self.posting_comment || self.choosing_submission_file
+        self.busy || self.offline_pending || self.refreshing || self.changing_membership || self.posting_comment || self.choosing_submission_file
             || self.saving_drive_file || self.preparing_drive_preview
             || self.saving_assignment_draft
             || self.saving_teacher_grade
@@ -733,7 +744,12 @@ impl App {
             Event::Window(window::Event::FileDropped(path)) => Some(Message::SubmissionFileDropped(path)),
             _ => None,
         });
-        let subscriptions = Subscription::batch([drag, edit_keys, file_drop]);
+        let clock = if self.screenshot_directory.is_none() {
+            iced::time::every(Duration::from_secs(30)).map(|_| Message::ClockTick(Local::now()))
+        } else {
+            Subscription::none()
+        };
+        let subscriptions = Subscription::batch([drag, edit_keys, file_drop, clock]);
         #[cfg(target_os = "macos")]
         if matches!(self.submission_capture, Some(CaptureState::RecordingCamera { .. })) {
             let frames = iced::time::every(Duration::from_millis(100))

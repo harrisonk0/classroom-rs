@@ -4,7 +4,7 @@ use iced::widget::column;
 impl App {
     pub(super) fn home(&self, archived: bool) -> Element<'_, Message> {
         let Some(data) = &self.snapshot else { return self.sign_in_view() };
-        let now = Local::now();
+        let now = self.now;
         let query = self.search.trim().to_lowercase();
         let matching_state = |course: &&Course| {
             if archived { course.state == CourseState::Archived } else { home_course(course) }
@@ -26,7 +26,7 @@ impl App {
         } else {
             format!("{} of {} classes", visible.len(), group_count)
         };
-        let search = text_input("Search classes", &self.search)
+        let search = text_input("Search classes", &self.search).id("class-search")
             .on_input(Message::Search)
             .size(14)
             .padding([11, 13])
@@ -78,16 +78,16 @@ impl App {
         } else {
             let save: Element<'_, Message> = if data.source == SnapshotSource::Live {
                 button("Save offline copy").style(quiet_style).padding([8, 11])
-                    .on_press_maybe((!self.has_pending_request()).then_some(Message::SaveOffline)).into()
+                    .on_press_maybe((!self.has_pending_request()).then_some(Message::Offline(OfflineMessage::Save))).into()
             } else {
                 space().width(0).into()
             };
             row![
                 save,
                 button("View saved copy").style(quiet_style).padding([8, 11])
-                    .on_press_maybe((!self.has_pending_request()).then_some(Message::OpenOffline)),
+                    .on_press_maybe((!self.has_pending_request()).then_some(Message::Offline(OfflineMessage::Open))),
                 button("Remove offline copy").style(quiet_style).padding([8, 11])
-                    .on_press_maybe((!self.has_pending_request()).then_some(Message::DeleteOffline)),
+                    .on_press_maybe((!self.has_pending_request()).then_some(Message::Offline(OfflineMessage::Delete))),
             ].spacing(10).into()
         };
         let mut page = column![].spacing(25);

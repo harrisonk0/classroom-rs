@@ -239,7 +239,7 @@ impl App {
                         ).width(Fill),
                     ].spacing(11).align_y(Alignment::Center))
                     .on_press(Message::Navigate(destination))
-                    .style(move |_, status| nav_style(self.is_selected_course(course.id), status))
+                    .style(move |theme, status| nav_style(theme, self.is_selected_course(course.id), status))
                     .padding([9, 13])
                     .width(Fill)
                 );
@@ -279,7 +279,7 @@ impl App {
         let color = if active { ACTIVE_FG } else { MUTED };
         button(row![icon(glyph, color, 20), text(label).color(color).size(15)]
             .spacing(14).align_y(Alignment::Center))
-            .style(move |_, status| nav_style(active, status))
+            .style(move |theme, status| nav_style(theme, active, status))
             .width(Fill)
             .padding([11, 14])
             .on_press(Message::Navigate(destination))

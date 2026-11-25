@@ -19,6 +19,7 @@ impl App {
                     self.calendar_monday = monday;
                 }
             }
+            Message::ClockTick(now) => self.now = now,
             Message::CalendarToday => self.calendar_monday = monday_of(Local::now().date_naive()),
             Message::CalendarFilter(class) => self.calendar_class = class.id,
             _ => {}

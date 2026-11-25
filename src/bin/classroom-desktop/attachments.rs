@@ -17,8 +17,17 @@ impl App {
                         == Some(desktop_auth::SubmissionAction::TurnIn))
     }
 
-    pub(super) fn stage_submission_file(&mut self, course: i64, item: i64, path: PathBuf) {
-        match validate_submission_file(&path) {
+    pub(super) fn validate_file_for_staging(&mut self, course: i64, item: i64, path: PathBuf) -> Task<Message> {
+        self.choosing_submission_file = true;
+        let checked_path = path.clone();
+        Task::perform(async move {
+            tokio::task::spawn_blocking(move || validate_submission_file(&checked_path)).await
+                .map_err(|_| "Could not check the selected file.".to_string())?
+        }, move |result| Message::SubmissionFileValidated(course, item, path.clone(), result))
+    }
+
+    pub(super) fn stage_submission_file(&mut self, course: i64, item: i64, path: PathBuf, result: Result<(), String>) {
+        match result {
             Ok(()) => {
                 self.submission_file = Some((course, item, path));
                 self.error = None;
@@ -327,7 +336,7 @@ impl App {
             ].align_y(Alignment::Center),
             row([DriveSection::Recent, DriveSection::MyDrive, DriveSection::Shared].into_iter().map(|section| {
                 let selected = picker.section == section;
-                button(section.label()).padding([4, 7]).style(move |_, status| nav_style(selected, status))
+                button(section.label()).padding([4, 7]).style(move |theme, status| nav_style(theme, selected, status))
                     .on_press_maybe((ready && (!selected || !picker.folder_path.is_empty()))
                         .then_some(Message::BrowseDrive(course, DriveNavigation::Section(section)))).into()
             })).spacing(5).wrap().vertical_spacing(5),

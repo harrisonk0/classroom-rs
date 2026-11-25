@@ -6,7 +6,7 @@ impl App {
         let items = self.snapshot.as_ref().and_then(|snapshot| snapshot.coursework_for(id));
         let filters = row(WorkFilter::ALL.into_iter().map(|filter| {
             let active = self.work_filter == filter;
-            button(filter.label()).padding([8, 12]).style(move |_, status| nav_style(active, status))
+            button(filter.label()).padding([8, 12]).style(move |theme, status| nav_style(theme, active, status))
                 .on_press(Message::SetWorkFilter(filter)).into()
         })).spacing(6).wrap().vertical_spacing(6);
         let mut body = column![

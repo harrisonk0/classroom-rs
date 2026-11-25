@@ -132,48 +132,6 @@ impl App {
         self.artwork.get(course.theme.as_ref()?.artwork_url.as_ref()?)
     }
 
-    pub(super) fn save_offline(&mut self) {
-        let (Some(session), Some(snapshot)) = (&self.session, &self.snapshot) else { return };
-        let result = cache_path().ok_or_else(|| "Offline storage isn't available.".to_string())
-            .and_then(|path| desktop_data::save_cache(path, &session.account, snapshot)
-                .map_err(|_| "The offline copy couldn't be saved.".into()));
-        self.finish_cache_action(result, "Offline copy saved on this Mac.");
-    }
-
-    pub(super) fn open_offline(&mut self) {
-        let Some(session) = &self.session else { return };
-        let result = cache_path().ok_or_else(|| "Offline storage isn't available.".to_string())
-            .and_then(|path| desktop_data::load_cache(path, &session.account)
-                .map_err(|_| "The offline copy couldn't be opened.".into()));
-        match result {
-            Ok(Some(snapshot)) => {
-                self.install_snapshot(snapshot);
-                self.error = None;
-                self.notice = None;
-                self.screen = Screen::Home;
-                self.demo = false;
-            }
-            Ok(None) => self.error = Some("There is no saved copy for that email.".into()),
-            Err(error) => self.error = Some(error),
-        }
-    }
-
-    pub(super) fn delete_offline(&mut self) {
-        let Some(session) = &self.session else { return };
-        let result = cache_path().ok_or_else(|| "Offline storage isn't available.".to_string())
-            .and_then(|path| desktop_data::clear_cache(path, &session.account)
-                .map_err(|_| "The offline copy couldn't be removed.".into()));
-        if result.is_ok() && self.snapshot.as_ref().is_some_and(|data| data.source == SnapshotSource::Cache) {
-            self.install_snapshot(session.snapshot.clone());
-        }
-        self.finish_cache_action(result, "Offline copy removed from this Mac.");
-    }
-
-    fn finish_cache_action(&mut self, result: Result<(), String>, success: &str) {
-        self.error = result.as_ref().err().cloned();
-        self.notice = result.is_ok().then(|| success.to_owned());
-    }
-
     pub(super) fn reset_personal_copy(&mut self) {
         self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
         self.personal_copy_checks.clear();

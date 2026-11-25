@@ -15,7 +15,7 @@ impl App {
                     self.notice = None;
                     let coursework = Task::perform(
                         async move { desktop_auth::load_coursework(&session, id).await },
-                        move |result| Message::CourseworkLoaded(id, result),
+                        move |result| Message::CourseworkLoaded(id, result.map(Arc::new)),
                     );
                     let access = self.missing_stream_access(id).then_some(Message::LoadStreamAccess(id));
                     return Task::batch([coursework, access.map_or_else(Task::none, |message| self.update(message))]);
@@ -83,6 +83,7 @@ impl App {
                 }
                 match result {
                     Ok(contents) => {
+                        let contents = Arc::unwrap_or_clone(contents);
                         self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
                         self.personal_copy_checks.retain(|(course, _), _| *course != id);
                         if self.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {

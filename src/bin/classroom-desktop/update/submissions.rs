@@ -41,7 +41,7 @@ impl App {
                 self.choosing_submission_file = false;
                 if self.can_add_submission_drive_file(course, item) {
                     match result {
-                        Ok(Some(path)) => self.stage_submission_file(course, item, path),
+                        Ok(Some(path)) => return self.validate_file_for_staging(course, item, path),
                         Ok(None) => {},
                         Err(error) => self.error = Some(error),
                     }
@@ -58,7 +58,13 @@ impl App {
                     && self.pending_personal_copy.is_none()
                     && self.pending_remove_material.is_none()
                 {
-                    self.stage_submission_file(course, item, path);
+                    return self.validate_file_for_staging(course, item, path);
+                }
+            }
+            Message::SubmissionFileValidated(course, item, path, result) => {
+                self.choosing_submission_file = false;
+                if self.can_add_submission_drive_file(course, item) {
+                    self.stage_submission_file(course, item, path, result);
                 }
             }
             Message::CancelSubmissionFile => self.submission_file = None,
@@ -73,20 +79,26 @@ impl App {
                     self.submission_file = Some((selected_course, selected_item, path));
                     return Task::none();
                 }
-                if let Err(error) = validate_submission_file(&path) {
-                    self.submission_file = Some((course, item, path));
-                    self.error = Some(error);
-                    return Task::none();
-                }
                 self.sending_submission = true;
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move {
-                    desktop_auth::attach_submission_file(&session, course, item, path).await
-                }, move |result| Message::SubmissionFileUploaded(course, result));
+                    let checked_path = path.clone();
+                    let validation = tokio::task::spawn_blocking(move || validate_submission_file(&checked_path)).await
+                        .unwrap_or_else(|_| Err("Could not check the selected file.".into()));
+                    if let Err(error) = validation {
+                        return (Err(error), Some((item, path)));
+                    }
+                    (desktop_auth::attach_submission_file(&session, course, item, path).await, None)
+                }, move |(result, file)| Message::SubmissionFileUploaded(course, result, file));
             }
-            Message::SubmissionFileUploaded(course, result) => {
+            Message::SubmissionFileUploaded(course, result, file) => {
                 self.sending_submission = false;
+                if let Some((item, path)) = file
+                    && self.can_add_submission_drive_file(course, item)
+                {
+                    self.submission_file = Some((course, item, path));
+                }
                 match result {
                     Ok(()) => {
                         self.notice = Some("File uploaded and attached to your work.".into());

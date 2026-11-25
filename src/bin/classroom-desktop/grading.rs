@@ -236,7 +236,7 @@ impl App {
                     let count = work.students.iter().filter(|student| filter.includes(student)).count();
                     let selected = work.filter == filter;
                     button(text(format!("{} {count}", filter.label())).size(13))
-                        .padding([7, 10]).style(move |_, status| nav_style(selected, status))
+                        .padding([7, 10]).style(move |theme, status| nav_style(theme, selected, status))
                         .on_press(Message::FilterStudentWork(filter)).into()
                 });
                 panel = panel.push(row(filters).spacing(6).wrap().vertical_spacing(6));
@@ -257,7 +257,7 @@ impl App {
                         text(student.status.label()).size(13).color(MUTED),
                         text(if selected { "⌃" } else { "⌄" }).size(16).color(MUTED),
                     ].spacing(8).align_y(Alignment::Center)).width(Fill).padding([7, 10])
-                    .style(move |_, status| nav_style(selected, status)).on_press(Message::SelectTeacherStudent(student.student_id));
+                    .style(move |theme, status| nav_style(theme, selected, status)).on_press(Message::SelectTeacherStudent(student.student_id));
                     if can_return {
                         let selection: Element<'_, Message> = if desktop_auth::TeacherGradingAction::Return.allowed(student, None) {
                             checkbox(work.bulk_selected.contains(&student.student_id))

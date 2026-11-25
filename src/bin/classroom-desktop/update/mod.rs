@@ -21,6 +21,7 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::Offline(message) => self.update_offline(message),
             #[cfg(target_os = "macos")]
             Message::Capture(_) => self.update_navigation(message),
             #[cfg(target_os = "macos")]
@@ -151,9 +152,6 @@ impl App {
             | Message::Reconnected(..)
             | Message::Refresh
             | Message::Refreshed(..)
-            | Message::SaveOffline
-            | Message::OpenOffline
-            | Message::DeleteOffline
             | Message::Demo
             | Message::Disconnect
             | Message::SessionForgotten(..) => self.update_session(message),
@@ -247,6 +245,7 @@ impl App {
             | Message::ChooseSubmissionFile(..)
             | Message::SubmissionFileChosen(..)
             | Message::SubmissionFileDropped(..)
+            | Message::SubmissionFileValidated(..)
             | Message::CancelSubmissionFile
             | Message::ConfirmPersonalCopy(..)
             | Message::CancelPersonalCopy
@@ -274,13 +273,14 @@ impl App {
             | Message::FilterTodoClass(..)
             | Message::ToggleTodoGroup(..)
             | Message::CalendarShift(..)
+            | Message::ClockTick(..)
             | Message::CalendarToday
             | Message::CalendarFilter(..) => self.update_deadlines(message),
             Message::ScreenshotReady(..) => self.update_screenshots(message),
         }
     }
 
-    fn finish_update(&mut self) -> Task<Message> {
+    pub(super) fn finish_update(&mut self) -> Task<Message> {
         if !self.screen.uses_assignment_overview() {
             self.cancel_assignment_batch();
         }

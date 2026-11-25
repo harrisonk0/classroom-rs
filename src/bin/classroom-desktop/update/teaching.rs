@@ -246,7 +246,7 @@ impl App {
                 self.notice = None;
                 return Task::perform(async move {
                     desktop_auth::reorder_classwork(&session, course, &id, &topic, &order, direction).await
-                }, move |result| Message::ClassworkReordered(course, result));
+                }, move |result| Message::ClassworkReordered(course, result.map(Arc::new)));
             }
             Message::ClassworkReordered(course, result) => {
                 self.saving_topic = false;

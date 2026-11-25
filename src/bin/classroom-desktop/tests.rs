@@ -320,10 +320,11 @@ fn dropped_files_stage_only_nonempty_regular_files_and_preserve_existing_selecti
     fs::write(&good, "text").unwrap();
     fs::write(&empty, "").unwrap();
     let (mut app, _) = fixture();
-    app.stage_submission_file(1, 42, good.clone());
+    app.stage_submission_file(1, 42, good.clone(), validate_submission_file(&good));
     assert_eq!(app.submission_file, Some((1, 42, good.clone())));
     for bad in [empty, directory.path().to_owned(), directory.path().join("missing")] {
-        app.stage_submission_file(1, 42, bad);
+        let result = validate_submission_file(&bad);
+        app.stage_submission_file(1, 42, bad, result);
         assert_eq!(app.submission_file, Some((1, 42, good.clone())));
         assert!(app.error.is_some());
     }
@@ -752,10 +753,10 @@ fn confirmed_join_waits_for_the_joined_class_in_the_refreshed_list() {
     assert_eq!(app.screen, Screen::Home);
     assert!(app.pending_invitations().next().is_none());
     assert_eq!(app.opening_joined_course, Some(799));
-    let _ = app.update(Message::Refreshed(Ok(snapshot.clone())));
+    let _ = app.update(Message::Refreshed(Ok(Arc::new(snapshot.clone()))));
     assert_eq!(app.screen, Screen::Home);
     snapshot.courses.push(invited);
-    let _ = app.update(Message::Refreshed(Ok(snapshot)));
+    let _ = app.update(Message::Refreshed(Ok(Arc::new(snapshot))));
     assert_eq!((app.screen, app.tab), (Screen::Course(799), Tab::Stream));
     assert!(app.opening_joined_course.is_none());
 }
@@ -817,7 +818,7 @@ fn opening_classwork_fetches_submission_status_after_coursework() {
     let _ = app.update(Message::SetTab(Tab::Classwork));
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()), Some(PageRead::Coursework(1)));
 
-    let _ = app.update(Message::CourseworkLoaded(1, Ok(CourseContents { items, topics: None })));
+    let _ = app.update(Message::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None }))));
     let submissions = DetailRead::Submissions(1);
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()), Some(PageRead::Detail(submissions)));
     let _ = app.update(Message::DetailLoaded(submissions, Ok(DetailData::Submissions(vec![]))));
@@ -1131,7 +1132,7 @@ fn opening_an_unloaded_item_fetches_classwork_then_comments() {
 
     let _ = app.update(Message::OpenItem(1, "42".into()));
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Coursework(1)));
-    let _ = app.update(Message::CourseworkLoaded(1, Ok(CourseContents { items, topics: None })));
+    let _ = app.update(Message::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None }))));
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()), Some(PageRead::StreamAccess(1)));
     app.loading_stream_access.insert(1);
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()),
@@ -1200,7 +1201,7 @@ fn topic_link_opens_classwork_and_keeps_selection_when_items_load() {
     let _ = app.update(Message::OpenClassroomLink);
     assert_eq!((app.screen, app.tab), (Screen::Course(1), Tab::Classwork));
     assert_eq!(app.selected_topic.as_deref(), Some("456"));
-    let _ = app.update(Message::CourseworkLoaded(1, Ok(CourseContents { items, topics: None })));
+    let _ = app.update(Message::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None }))));
     assert_eq!(app.selected_topic.as_deref(), Some("456"));
     assert_eq!(app.snapshot.as_ref().unwrap().classwork_sections(1, Some("456")).len(), 1);
 }
@@ -1390,6 +1391,23 @@ fn page_navigation_remains_queued_during_an_existing_request() {
     assert!(app.queued_page_load);
     assert_eq!((app.screen, app.tab), (Screen::Course(1), Tab::People));
 
-    let _ = app.update(Message::CourseworkLoaded(2, Ok(CourseContents { items: vec![], topics: None })));
+    let _ = app.update(Message::CourseworkLoaded(2, Ok(Arc::new(CourseContents { items: vec![], topics: None }))));
     assert!(!app.queued_page_load);
+}
+
+#[test]
+fn offline_completion_clears_busy_state_and_opens_the_cached_snapshot() {
+    let (mut app, mut snapshot) = fixture();
+    snapshot.source = SnapshotSource::Cache;
+    app.offline_pending = true;
+    app.notice = Some("Opening the offline copy…".into());
+
+    let _ = app.update(Message::Offline(OfflineMessage::Finished(Ok(
+        offline::OfflineResult::Opened(Arc::new(snapshot)),
+    ))));
+
+    assert!(!app.offline_pending);
+    assert_eq!(app.screen, Screen::Home);
+    assert_eq!(app.snapshot.unwrap().source, SnapshotSource::Cache);
+    assert!(app.notice.is_none());
 }
