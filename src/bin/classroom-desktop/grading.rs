@@ -18,9 +18,9 @@ impl App {
         if !self.can_edit_gradebook(course) || self.gradebook_maximum(course, item).is_none() {
             return Task::none();
         }
-        let Some(cell) = self.gradebooks.get(&course).and_then(|grid| grid.cells.get(&(student, item))).filter(|cell| cell.can_edit())
+        let Some(cell) = self.grading.gradebooks.get(&course).and_then(|grid| grid.cells.get(&(student, item))).filter(|cell| cell.can_edit())
             else { return Task::none(); };
-        self.gradebook_edit = Some(GradebookEdit {
+        self.grading.gradebook_edit = Some(GradebookEdit {
             course, item, expected: cell.grading_row(student),
             input: cell.draft_grade.or(cell.released_grade).map_or_else(String::new, |grade| grade.to_string()),
         });
@@ -32,10 +32,10 @@ impl App {
         const CELL_WIDTH: f32 = 142.0;
         const NAME_WIDTH: f32 = 164.0;
         if !self.can_read_pages() && self.screenshot_directory.is_none() {
-            return text("Sign in to view grades.").size(14).color(MUTED).into();
+            return text("Sign in to view grades.").size(14).style(move |theme| themed_text(theme, MUTED)).into();
         }
         if self.class_roles.get(&course) != Some(&CourseRole::Teacher) {
-            return text("Checking gradebook access…").size(14).color(MUTED).into();
+            return text("Checking gradebook access…").size(14).style(move |theme| themed_text(theme, MUTED)).into();
         }
         let items = self.snapshot.as_ref().and_then(|snapshot| snapshot.coursework_for(course));
         if items.is_none()
@@ -43,7 +43,7 @@ impl App {
         {
             return status;
         }
-        let grid = self.gradebooks.get(&course);
+        let grid = self.grading.gradebooks.get(&course);
         if let Some(status) = self.page_read_status(
             PageRead::Detail(DetailRead::TeacherGradebook(course)), grid.is_some(), "Loading gradebook…",
         ) {
@@ -57,7 +57,7 @@ impl App {
         }
         let total_columns = columns.len();
         let pages = total_columns.div_ceil(COLUMN_LIMIT);
-        let page = self.gradebook_page.min(pages - 1);
+        let page = self.grading.gradebook_page.min(pages - 1);
         let start = page * COLUMN_LIMIT;
         let stop = (start + COLUMN_LIMIT).min(columns.len());
         let columns = &columns[start..stop];
@@ -69,11 +69,11 @@ impl App {
                 text(&item.title).size(14).font(medium()).wrapping(text::Wrapping::WordOrGlyph),
             ].spacing(4);
             if let Some(points) = item.maximum_points {
-                header = header.push(text(format!("{points} points")).size(12).color(MUTED));
+                header = header.push(text(format!("{points} points")).size(12).style(move |theme| themed_text(theme, MUTED)));
             }
             heading = heading.push(container(header).padding(8).width(CELL_WIDTH));
         }
-        let mut table = column![container(heading).style(|_| surface(SOFT, 5.0))].spacing(1);
+        let mut table = column![container(heading).style(|theme| surface(appearance_color(theme, SOFT), 5.0))].spacing(1);
         for student in &grid.students {
             let Ok(id) = student.id.parse::<i64>() else { continue; };
             let mut line = row![container(text(&student.display_name).size(14).wrapping(text::Wrapping::WordOrGlyph))
@@ -90,30 +90,30 @@ impl App {
                     };
                     let color = if cell.status == SubmissionStatus::Missing { color!(0xa42620) }
                         else if draft.is_some() { color!(0x137333) } else { FG };
-                    if let Some(edit) = self.gradebook_edit.as_ref().filter(|edit| {
+                    if let Some(edit) = self.grading.gradebook_edit.as_ref().filter(|edit| {
                         (edit.course, edit.item, edit.expected.student_id) == (course, *item, id)
                     }) {
                         let ready = !self.has_pending_request() && edit.grade(work.maximum_points).is_some();
                         let submit = ready || (!self.has_pending_request() && grade_input_matches_saved(&edit.input, &edit.expected));
                         let field = text_input("Points", &edit.input).id(GRADEBOOK_FIELD).padding(6).width(Fill)
-                            .on_input_maybe((!self.saving_teacher_grade).then_some(Message::GradebookGradeInput))
-                            .on_submit_maybe(submit.then_some(Message::SaveGradebookEdit(true)));
+                            .on_input_maybe((!self.grading.saving_teacher_grade).then_some(|value| Message::Teaching(TeachingMessage::GradebookGradeInput(value))))
+                            .on_submit_maybe(submit.then_some(Message::Teaching(TeachingMessage::SaveGradebookEdit(true))));
                         line = line.push(row![
                             field,
                             button("Save").padding([6, 7]).style(outline_style)
-                                .on_press_maybe(ready.then_some(Message::SaveGradebookEdit(false))),
+                                .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::SaveGradebookEdit(false)))),
                         ].spacing(4).align_y(Alignment::Center).width(CELL_WIDTH));
                     } else {
-                        let action = if self.gradebook_edit_mode && cell.can_edit() && work.maximum_points.is_some() {
-                            Message::EditGradebookCell(course, *item, id)
+                        let action = if self.grading.gradebook_edit_mode && cell.can_edit() && work.maximum_points.is_some() {
+                            Message::Teaching(TeachingMessage::EditGradebookCell(course, *item, id))
                         } else {
-                            Message::OpenGradebookCell(course, *item, id)
+                            Message::Navigation(NavigationMessage::OpenGradebookCell(course, *item, id))
                         };
-                        line = line.push(button(text(label).size(13).color(color)).style(quiet_style).padding(8)
-                            .width(CELL_WIDTH).on_press_maybe(self.gradebook_edit.is_none().then_some(action)));
+                        line = line.push(button(text(label).size(13).style(move |theme| themed_text(theme, color))).style(quiet_style).padding(8)
+                            .width(CELL_WIDTH).on_press_maybe(self.grading.gradebook_edit.is_none().then_some(action)));
                     }
                 } else {
-                    line = line.push(container(text("—").size(13).color(MUTED)).padding(8).width(CELL_WIDTH));
+                    line = line.push(container(text("—").size(13).style(move |theme| themed_text(theme, MUTED))).padding(8).width(CELL_WIDTH));
                 }
             }
             table = table.push(rule::horizontal(1).style(divider_style)).push(line);
@@ -121,28 +121,28 @@ impl App {
         let mut actions = row![].spacing(8);
         #[cfg(target_os = "macos")]
         {
-            actions = actions.push(button(if self.exporting_grades { "Exporting…" } else { "Download grades (.csv)" })
+            actions = actions.push(button(if self.grading.exporting_grades { "Exporting…" } else { "Download grades (.csv)" })
                 .style(outline_style).padding([7, 10])
-                .on_press_maybe((!self.has_pending_request()).then_some(Message::ExportGrades(course, None))));
+                .on_press_maybe((!self.has_pending_request()).then_some(Message::Teaching(TeachingMessage::ExportGrades(course, None)))));
         }
         if self.can_edit_gradebook(course) || self.screenshot_directory.is_some() {
-            actions = actions.push(button(if self.gradebook_edit_mode { "Done editing" } else { "Edit grades" })
+            actions = actions.push(button(if self.grading.gradebook_edit_mode { "Done editing" } else { "Edit grades" })
                 .style(outline_style).padding([7, 10])
-                .on_press_maybe((!self.has_pending_request() && self.gradebook_edit.is_none())
-                    .then_some(Message::GradebookEditMode(!self.gradebook_edit_mode))));
-            if self.gradebook_edit.is_some() {
+                .on_press_maybe((!self.has_pending_request() && self.grading.gradebook_edit.is_none())
+                    .then_some(Message::Teaching(TeachingMessage::GradebookEditMode(!self.grading.gradebook_edit_mode)))));
+            if self.grading.gradebook_edit.is_some() {
                 actions = actions.push(button("Cancel cell edit").style(quiet_style).padding([7, 10])
-                    .on_press_maybe((!self.saving_teacher_grade).then_some(Message::CancelGradebookEdit)));
+                    .on_press_maybe((!self.grading.saving_teacher_grade).then_some(Message::Teaching(TeachingMessage::CancelGradebookEdit))));
             }
         }
-        let mut page_view = column![text("Grades").size(23).font(medium()).color(FG), actions.wrap().vertical_spacing(6)].spacing(10);
+        let mut page_view = column![text("Grades").size(23).font(medium()).style(move |theme| themed_text(theme, FG)), actions.wrap().vertical_spacing(6)].spacing(10);
         if pages > 1 {
             page_view = page_view.push(row![
                 button("‹").style(outline_style).padding([6, 10])
-                    .on_press_maybe((page > 0 && self.gradebook_edit.is_none()).then_some(Message::GradebookColumnPage(page.saturating_sub(1)))),
+                    .on_press_maybe((page > 0 && self.grading.gradebook_edit.is_none()).then_some(Message::Navigation(NavigationMessage::GradebookColumnPage(page.saturating_sub(1))))),
                 text(format!("Classwork {}–{stop} of {total_columns}", start + 1)).size(13),
                 button("›").style(outline_style).padding([6, 10])
-                    .on_press_maybe((page + 1 < pages && self.gradebook_edit.is_none()).then_some(Message::GradebookColumnPage(page + 1))),
+                    .on_press_maybe((page + 1 < pages && self.grading.gradebook_edit.is_none()).then_some(Message::Navigation(NavigationMessage::GradebookColumnPage(page + 1)))),
             ].spacing(8).align_y(Alignment::Center));
         }
         page_view.push(scrollable(table)
@@ -158,7 +158,7 @@ impl App {
     }
 
     pub(super) fn selected_teacher_feedback_key(&self) -> Option<desktop_auth::TeacherFeedbackKey> {
-        let work = self.teacher_work.as_ref()?;
+        let work = self.grading.teacher_work.as_ref()?;
         if self.screen != Screen::Item(work.course) || self.item_id.as_deref()?.parse::<i64>().ok()? != work.item
             || self.class_roles.get(&work.course) != Some(&CourseRole::Teacher)
         {
@@ -175,7 +175,7 @@ impl App {
         let (Some(session), Some(snapshot)) = (self.session.clone(), self.snapshot.as_ref()) else { return Task::none(); };
         let Some(items) = snapshot.coursework_for(course) else { return Task::none(); };
         let (csv, suggested) = if let Some(item) = item {
-            let Some(work) = self.teacher_work.as_ref().filter(|work| work.course == course && work.item == item
+            let Some(work) = self.grading.teacher_work.as_ref().filter(|work| work.course == course && work.item == item
                 && self.can_read_teacher_work(course, item)) else { return Task::none(); };
             let Some(assignment) = items.iter().find(|entry| entry.id.parse::<i64>().ok() == Some(item)) else { return Task::none(); };
             let grid = desktop_auth::TeacherGradebook {
@@ -191,13 +191,13 @@ impl App {
             (grade_export::gradebook_csv(&grid, &[(item, assignment)]), grade_export::suggested_name(&assignment.title))
         } else {
             if self.screen != Screen::Course(course) || self.tab != Tab::Grades { return Task::none(); }
-            let Some(grid) = self.gradebooks.get(&course) else { return Task::none(); };
+            let Some(grid) = self.grading.gradebooks.get(&course) else { return Task::none(); };
             let Some(entry) = snapshot.courses.iter().find(|entry| entry.id == course) else { return Task::none(); };
             let columns: Vec<_> = items.iter().filter(|item| has_submission(item))
                 .filter_map(|item| Some((item.id.parse::<i64>().ok()?, item))).collect();
             (grade_export::gradebook_csv(grid, &columns), grade_export::suggested_name(&entry.title))
         };
-        self.exporting_grades = true;
+        self.grading.exporting_grades = true;
         self.error = None;
         return Task::perform(async move {
             let details = desktop_auth::load_own_class_details(&session, vec![course]).await?;
@@ -208,7 +208,7 @@ impl App {
             tokio::task::spawn_blocking(move || grade_export::save_csv(&path, &csv)).await
                 .map_err(|_| "The local CSV save did not finish.")??;
             Ok(true)
-        }, Message::GradesExported);
+        }, |value| Message::Teaching(TeachingMessage::GradesExported(value)));
     }
 
     pub(super) fn can_grade_teacher_work(&self, course: i64) -> bool {
@@ -218,9 +218,9 @@ impl App {
 
     pub(super) fn teacher_student_work_panel<'a>(&'a self, item: &'a Coursework) -> Element<'a, Message> {
         let mut panel = column![text(if item.kind == CourseworkKind::Question { "Student answers" } else { "Student work" })
-            .size(18).font(medium()).color(FG)].spacing(10).width(Fill);
+            .size(18).font(medium()).style(move |theme| themed_text(theme, FG))].spacing(10).width(Fill);
         if let Ok(id) = item.id.parse::<i64>() {
-            let work = self.teacher_work.as_ref().filter(|work| work.course == item.course_id && work.item == id);
+            let work = self.grading.teacher_work.as_ref().filter(|work| work.course == item.course_id && work.item == id);
             if let Some(status) = self.page_read_status(
                 PageRead::Detail(DetailRead::TeacherSubmissions(item.course_id, id)), work.is_some(), "Loading student submissions…",
             ) {
@@ -230,14 +230,14 @@ impl App {
                 #[cfg(target_os = "macos")]
                 {
                     panel = panel.push(button("Download these grades (.csv)").padding([7, 10]).style(outline_style)
-                        .on_press_maybe((!self.has_pending_request()).then_some(Message::ExportGrades(item.course_id, Some(id)))));
+                        .on_press_maybe((!self.has_pending_request()).then_some(Message::Teaching(TeachingMessage::ExportGrades(item.course_id, Some(id))))));
                 }
                 let filters = StudentWorkFilter::ALL.into_iter().map(|filter| {
                     let count = work.students.iter().filter(|student| filter.includes(student)).count();
                     let selected = work.filter == filter;
                     button(text(format!("{} {count}", filter.label())).size(13))
                         .padding([7, 10]).style(move |theme, status| nav_style(theme, selected, status))
-                        .on_press(Message::FilterStudentWork(filter)).into()
+                        .on_press(Message::Teaching(TeachingMessage::FilterStudentWork(filter))).into()
                 });
                 panel = panel.push(row(filters).spacing(6).wrap().vertical_spacing(6));
                 let can_return = self.can_grade_teacher_work(item.course_id) || self.screenshot_directory.is_some();
@@ -246,7 +246,7 @@ impl App {
                 }
                 let mut visible = work.students.iter().filter(|student| work.filter.includes(student)).peekable();
                 if visible.peek().is_none() {
-                    panel = panel.push(text("No student work in this view.").size(14).color(MUTED));
+                    panel = panel.push(text("No student work in this view.").size(14).style(move |theme| themed_text(theme, MUTED)));
                 }
                 for student in visible {
                     let selected = work.selected == Some(student.student_id);
@@ -254,16 +254,16 @@ impl App {
                     let student_row = button(row![
                         avatar(first_initial(name), BLUE, 28.0, 12.0),
                         text(name).size(15).width(Fill),
-                        text(student.status.label()).size(13).color(MUTED),
-                        text(if selected { "⌃" } else { "⌄" }).size(16).color(MUTED),
+                        text(student.status.label()).size(13).style(move |theme| themed_text(theme, MUTED)),
+                        text(if selected { "⌃" } else { "⌄" }).size(16).style(move |theme| themed_text(theme, MUTED)),
                     ].spacing(8).align_y(Alignment::Center)).width(Fill).padding([7, 10])
-                    .style(move |theme, status| nav_style(theme, selected, status)).on_press(Message::SelectTeacherStudent(student.student_id));
+                    .style(move |theme, status| nav_style(theme, selected, status)).on_press(Message::Teaching(TeachingMessage::SelectTeacherStudent(student.student_id)));
                     if can_return {
                         let selection: Element<'_, Message> = if desktop_auth::TeacherGradingAction::Return.allowed(student, None) {
                             checkbox(work.bulk_selected.contains(&student.student_id))
                                 .on_toggle_maybe((!self.has_pending_request()).then(|| {
                                     let id = student.student_id;
-                                    move |checked| Message::SelectBulkReturn(id, checked)
+                                    move |checked| Message::Teaching(TeachingMessage::SelectBulkReturn(id, checked))
                                 })).into()
                         } else {
                             space().width(18).into()
@@ -278,11 +278,11 @@ impl App {
                         for (label, grade) in [("Released grade", student.released_grade), ("Draft grade", pending_grade)] {
                             if let Some(grade) = grade {
                                 let mark = item.maximum_points.map_or_else(|| grade.to_string(), |out_of| format!("{grade} / {out_of}"));
-                                detail = detail.push(text(format!("{label} · {mark}")).size(14).color(FG));
+                                detail = detail.push(text(format!("{label} · {mark}")).size(14).style(move |theme| themed_text(theme, FG)));
                             }
                         }
                         if let Some(QuestionAnswer::ShortAnswer(answer) | QuestionAnswer::MultipleChoice(answer)) = &student.answer {
-                            detail = detail.push(text(answer).size(15).color(FG).width(Fill)
+                            detail = detail.push(text(answer).size(15).style(move |theme| themed_text(theme, FG)).width(Fill)
                                 .wrapping(text::Wrapping::WordOrGlyph));
                         }
                         for attachment in &student.attachments {
@@ -291,7 +291,7 @@ impl App {
                         if student.released_grade.is_none() && student.draft_grade.is_none() && student.answer.is_none()
                             && student.attachments.is_empty()
                         {
-                            detail = detail.push(text("No grade, answer, or attachment was returned.").size(13).color(MUTED));
+                            detail = detail.push(text("No grade, answer, or attachment was returned.").size(13).style(move |theme| themed_text(theme, MUTED)));
                         }
                         if can_return && !work.bulk_confirming {
                             detail = detail.push(self.teacher_grading_controls(work, student, item.maximum_points));
@@ -306,7 +306,7 @@ impl App {
                 }
             }
         }
-        container(panel).padding(14).width(Fill).style(|_| outline_surface(9.0)).into()
+        container(panel).padding(14).width(Fill).style(|theme| outline_surface(theme, 9.0)).into()
     }
 
     fn bulk_return_controls<'a>(&'a self, work: &'a TeacherWork) -> Element<'a, Message> {
@@ -316,16 +316,16 @@ impl App {
         let all_selected = !visible.is_empty() && visible.iter().all(|row| work.bulk_selected.contains(&row.student_id));
         let mut actions = row![
             button(if all_selected { "Deselect visible" } else { "Select all visible" }).padding([7, 10]).style(quiet_style)
-                .on_press_maybe((ready && !visible.is_empty()).then_some(Message::SelectVisibleReturns(!all_selected))),
+                .on_press_maybe((ready && !visible.is_empty()).then_some(Message::Teaching(TeachingMessage::SelectVisibleReturns(!all_selected)))),
         ].spacing(6).align_y(Alignment::Center);
         if !selected.is_empty() {
-            actions = actions.push(text(format!("{} selected", selected.len())).size(13).color(MUTED));
+            actions = actions.push(text(format!("{} selected", selected.len())).size(13).style(move |theme| themed_text(theme, MUTED)));
             if !work.bulk_confirming {
                 actions = actions.push(button("Return selected…").padding([7, 10]).style(outline_style)
-                    .on_press_maybe(ready.then_some(Message::ConfirmBulkReturn(true))));
+                    .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::ConfirmBulkReturn(true)))));
             }
             actions = actions.push(button("Clear selection").padding([7, 10]).style(quiet_style)
-                .on_press_maybe(ready.then_some(Message::ClearBulkReturns)));
+                .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::ClearBulkReturns))));
         }
         let mut panel = column![actions.wrap().vertical_spacing(6)].spacing(8);
         if work.bulk_confirming && !selected.is_empty() {
@@ -333,9 +333,9 @@ impl App {
             panel = panel.push(text(format!("Return {} submissions? {graded} include a saved grade.", selected.len())).size(14))
                 .push(row![
                     button("Return work").padding([7, 10]).style(primary_style)
-                        .on_press_maybe(ready.then_some(Message::ReturnSelectedTeacherWork)),
+                        .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::ReturnSelectedTeacherWork))),
                     button("Cancel").padding([7, 10]).style(quiet_style)
-                        .on_press_maybe(ready.then_some(Message::ConfirmBulkReturn(false))),
+                        .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::ConfirmBulkReturn(false)))),
                 ].spacing(6));
         }
         panel.into()
@@ -344,7 +344,7 @@ impl App {
     fn teacher_feedback_panel<'a>(
         &'a self, key: desktop_auth::TeacherFeedbackKey, student: &'a str, compose: bool,
     ) -> Element<'a, Message> {
-        let thread = self.teacher_feedback.get(&key);
+        let thread = self.grading.teacher_feedback.get(&key);
         let comments = thread.and_then(|thread| thread.comments.as_ref());
         let mut panel = column![text(format!("Private feedback to {student}")).size(15).font(medium())].spacing(7);
         if let Some(status) = self.page_read_status(
@@ -354,7 +354,7 @@ impl App {
         }
         if let Some(comments) = comments {
             if comments.is_empty() {
-                panel = panel.push(text("No private comments on this submission.").size(13).color(MUTED));
+                panel = panel.push(text("No private comments on this submission.").size(13).style(move |theme| themed_text(theme, MUTED)));
             }
             for comment in comments {
                 panel = panel.push(self.comment_card(key.course, None, CommentAudience::Private, comment));
@@ -364,17 +364,17 @@ impl App {
             let draft = thread.map_or("", |thread| thread.draft.as_str());
             let unconfirmed = thread.is_some_and(|thread| thread.unconfirmed);
             if unconfirmed {
-                panel = panel.push(text("Review the updated thread before sending this draft again.").size(13).color(MUTED));
+                panel = panel.push(text("Review the updated thread before sending this draft again.").size(13).style(move |theme| themed_text(theme, MUTED)));
             }
             let ready = !self.has_pending_request() && comments.is_some() && !unconfirmed && !draft.trim().is_empty();
             panel = panel.push(row![
                 text_input("Add a private comment…", draft).padding(8).width(Fill)
-                    .on_input_maybe((!self.posting_comment).then(|| move |value| Message::EditTeacherFeedback(key, value))),
+                    .on_input_maybe((!self.comments.posting_comment).then(|| move |value| Message::Teaching(TeachingMessage::EditTeacherFeedback(key, value)))),
                 button("Send privately").style(primary_style).padding([8, 10])
-                    .on_press_maybe(ready.then_some(Message::SendTeacherFeedback(key))),
+                    .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::SendTeacherFeedback(key)))),
             ].spacing(6).wrap().vertical_spacing(6));
         }
-        container(panel).padding(10).width(Fill).style(|_| outline_surface(8.0)).into()
+        container(panel).padding(10).width(Fill).style(|theme| outline_surface(theme, 8.0)).into()
     }
 
     fn teacher_grading_controls<'a>(&'a self, work: &'a TeacherWork, student: &'a desktop_auth::TeacherSubmission,
@@ -386,9 +386,9 @@ impl App {
             let save = work.grade.trim().parse::<f64>().ok().is_some_and(|grade| SaveDraft(grade).allowed(student, maximum));
             controls = controls.push(row![
                 text_input("Points", &work.grade).padding(7).width(100)
-                    .on_input_maybe(ready.then_some(Message::EditTeacherGrade)),
+                    .on_input_maybe(ready.then_some(|value| Message::Teaching(TeachingMessage::EditTeacherGrade(value)))),
                 button("Save draft grade").padding([7, 10]).style(outline_style)
-                    .on_press_maybe((ready && save).then_some(Message::SaveTeacherGrade)),
+                    .on_press_maybe((ready && save).then_some(Message::Teaching(TeachingMessage::SaveTeacherGrade))),
             ].spacing(7).align_y(Alignment::Center));
         }
         if Return.allowed(student, maximum) {
@@ -400,13 +400,13 @@ impl App {
                 );
                 controls = controls.push(text(message).size(14)).push(row![
                     button("Return work").padding([7, 10]).style(primary_style)
-                        .on_press_maybe(ready.then_some(Message::ReturnTeacherWork)),
+                        .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::ReturnTeacherWork))),
                     button("Cancel").padding([7, 10]).style(quiet_style)
-                        .on_press_maybe((!self.saving_teacher_grade).then_some(Message::ConfirmReturnTeacherWork(false))),
+                        .on_press_maybe((!self.grading.saving_teacher_grade).then_some(Message::Teaching(TeachingMessage::ConfirmReturnTeacherWork(false)))),
                 ].spacing(6));
             } else {
                 controls = controls.push(button("Return…").padding([7, 10]).style(outline_style)
-                    .on_press_maybe(ready.then_some(Message::ConfirmReturnTeacherWork(true))));
+                    .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::ConfirmReturnTeacherWork(true)))));
             }
         }
         controls.into()
@@ -433,4 +433,17 @@ pub(super) fn grade_label(submission: &Submission) -> Option<String> {
         Some(maximum) => format!("Released grade: {} / {maximum}", grade.earned),
         None => format!("Released grade: {}", grade.earned),
     })
+}
+
+#[derive(Default)]
+pub(super) struct GradingState {
+    pub(super) teacher_work: Option<TeacherWork>,
+    pub(super) teacher_feedback: BTreeMap<desktop_auth::TeacherFeedbackKey, TeacherFeedbackThread>,
+    pub(super) gradebooks: BTreeMap<i64, desktop_auth::TeacherGradebook>,
+    pub(super) gradebook_page: usize,
+    pub(super) gradebook_student: Option<(i64, i64, i64)>,
+    pub(super) gradebook_edit_mode: bool,
+    pub(super) gradebook_edit: Option<GradebookEdit>,
+    pub(super) exporting_grades: bool,
+    pub(super) saving_teacher_grade: bool,
 }

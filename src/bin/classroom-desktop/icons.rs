@@ -1,4 +1,4 @@
-use super::{button, desktop_data, quiet_style, svg, text, tooltip, Color, CourseworkKind, Element, Message, Pixels, FG, MUTED};
+use super::{appearance_color, button, desktop_data, quiet_style, svg, text, tooltip, Color, CourseworkKind, Element, Message, Pixels, FG, MUTED};
 
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
@@ -40,7 +40,7 @@ pub(super) fn icon(glyph: Icon, color: Color, size: impl Into<Pixels>) -> Elemen
     let markup = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="none" stroke="black" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>"#);
     svg(svg::Handle::from_memory(markup.into_bytes()))
         .width(size).height(size)
-        .style(move |_, _| svg::Style { color: Some(color) })
+        .style(move |theme, _| svg::Style { color: Some(appearance_color(theme, color)) })
         .into()
 }
 

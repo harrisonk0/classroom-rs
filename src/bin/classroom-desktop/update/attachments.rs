@@ -1,27 +1,52 @@
 use super::*;
 
+#[derive(Clone)]
+pub(in crate::desktop) enum AttachmentsMessage {
+    OpenDrivePicker(i64),
+    OpenSubmissionDrivePicker(i64, i64),
+    ToggleNewSubmissionDocument(i64, i64),
+    CreateSubmissionDocument(i64, i64, DriveDocumentKind),
+    SubmissionDocumentCreated(i64, i64, Result<String, String>),
+    SubmissionDriveFileAttached(i64, Result<(), String>),
+    CloseDrivePicker,
+    EditDriveSearch(i64, String),
+    BrowseDrive(i64, DriveNavigation),
+    DriveScrolled(i64, u64, bool),
+    SearchDriveFiles(i64, bool),
+    DriveFilesLoaded(i64, u64, bool, Result<DriveFilePage, String>),
+    AttachExistingDriveFile(i64, String),
+    OpenAttachment(String),
+    OpenDriveFile(String),
+    PreviewDriveFile(desktop_data::Attachment),
+    DrivePreviewReady(Result<(Arc<tempfile::TempDir>, PathBuf), String>),
+    DrivePreviewClosed(Result<(), String>),
+    SaveDriveFile(desktop_data::Attachment),
+    DriveFileSaved(Result<bool, String>),
+    DriveFileLinkLoaded(String, Result<String, String>),
+}
+
 impl App {
-    pub(super) fn update_attachments(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_attachments(&mut self, message: AttachmentsMessage) -> Task<Message> {
         match message {
-            Message::OpenDrivePicker(id) if self.can_edit_stream_attachments(id) => {
-                self.drive_picker = Some(DrivePicker { course: id, ..Default::default() });
-                return self.update(Message::SearchDriveFiles(id, false));
+            AttachmentsMessage::OpenDrivePicker(id) if self.can_edit_stream_attachments(id) => {
+                self.attachments.drive_picker = Some(DrivePicker { course: id, ..Default::default() });
+                return self.update(Message::Attachments(AttachmentsMessage::SearchDriveFiles(id, false)));
             }
-            Message::OpenSubmissionDrivePicker(course, item) if self.can_add_submission_drive_file(course, item)
+            AttachmentsMessage::OpenSubmissionDrivePicker(course, item) if self.can_add_submission_drive_file(course, item)
                 && !self.has_pending_request() =>
             {
-                self.new_submission_document_open = false;
-                self.drive_picker = Some(DrivePicker { course, item: Some(item), ..Default::default() });
-                return self.update(Message::SearchDriveFiles(course, false));
+                self.attachments.new_submission_document_open = false;
+                self.attachments.drive_picker = Some(DrivePicker { course, item: Some(item), ..Default::default() });
+                return self.update(Message::Attachments(AttachmentsMessage::SearchDriveFiles(course, false)));
             }
-            Message::ToggleNewSubmissionDocument(course, item)
+            AttachmentsMessage::ToggleNewSubmissionDocument(course, item)
                 if self.can_add_submission_drive_file(course, item) && !self.has_pending_request() =>
             {
-                self.new_submission_document_open = !self.new_submission_document_open;
-                self.drive_picker = None;
+                self.attachments.new_submission_document_open = !self.attachments.new_submission_document_open;
+                self.attachments.drive_picker = None;
             }
-            Message::CreateSubmissionDocument(course, item, kind)
-                if self.new_submission_document_open && !self.has_pending_request()
+            AttachmentsMessage::CreateSubmissionDocument(course, item, kind)
+                if self.attachments.new_submission_document_open && !self.has_pending_request()
                     && self.can_add_submission_drive_file(course, item) =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
@@ -29,23 +54,23 @@ impl App {
                 let Some(work) = self.snapshot.as_ref().and_then(|snapshot| snapshot.coursework_for(course))
                     .and_then(|items| items.iter().find(|entry| entry.id == key)) else { return Task::none() };
                 let title = work.title.clone();
-                self.new_submission_document_open = false;
-                self.sending_submission = true;
+                self.attachments.new_submission_document_open = false;
+                self.student_work.sending_submission = true;
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move {
                     desktop_auth::create_submission_document(&session, course, item, title, kind).await
-                }, move |result| Message::SubmissionDocumentCreated(course, item, result));
+                }, move |result| Message::Attachments(AttachmentsMessage::SubmissionDocumentCreated(course, item, result)));
             }
-            Message::SubmissionDocumentCreated(course, item, result) => {
-                self.sending_submission = false;
+            AttachmentsMessage::SubmissionDocumentCreated(course, item, result) => {
+                self.student_work.sending_submission = false;
                 let open = match result {
                     Ok(url) => {
                         self.notice = Some("New file attached to your work.".into());
                         if self.screen == Screen::Item(course)
                             && self.item_id.as_deref().and_then(|id| id.parse::<i64>().ok()) == Some(item)
                         {
-                            self.update(Message::OpenAttachment(url))
+                            self.update(Message::Attachments(AttachmentsMessage::OpenAttachment(url)))
                         } else {
                             Task::none()
                         }
@@ -55,29 +80,29 @@ impl App {
                         Task::none()
                     }
                 };
-                return Task::batch([open, self.update(Message::LoadDetail(DetailRead::Submissions(course)))]);
+                return Task::batch([open, self.update(Message::Reads(ReadsMessage::LoadDetail(DetailRead::Submissions(course))))]);
             }
-            Message::CloseDrivePicker => self.drive_picker = None,
-            Message::EditDriveSearch(id, query) if query.len() <= 1024 => {
-                if let Some(picker) = self.drive_picker.as_mut().filter(|picker| picker.course == id) {
+            AttachmentsMessage::CloseDrivePicker => self.attachments.drive_picker = None,
+            AttachmentsMessage::EditDriveSearch(id, query) if query.len() <= 1024 => {
+                if let Some(picker) = self.attachments.drive_picker.as_mut().filter(|picker| picker.course == id) {
                     picker.query = query;
                 }
             }
-            Message::BrowseDrive(id, navigation) if self.can_use_drive_picker(id) => {
-                if let Some(picker) = self.drive_picker.as_mut().filter(|picker| picker.course == id)
+            AttachmentsMessage::BrowseDrive(id, navigation) if self.can_use_drive_picker(id) => {
+                if let Some(picker) = self.attachments.drive_picker.as_mut().filter(|picker| picker.course == id)
                     && picker.browse(navigation)
                 {
-                    return self.update(Message::SearchDriveFiles(id, false));
+                    return self.update(Message::Attachments(AttachmentsMessage::SearchDriveFiles(id, false)));
                 }
             }
-            Message::DriveScrolled(id, generation, true) if generation == self.drive_picker_generation
-                && self.drive_picker.as_ref().is_some_and(|picker| picker.course == id && picker.can_auto_page()) =>
+            AttachmentsMessage::DriveScrolled(id, generation, true) if generation == self.attachments.drive_picker_generation
+                && self.attachments.drive_picker.as_ref().is_some_and(|picker| picker.course == id && picker.can_auto_page()) =>
             {
-                return self.update(Message::SearchDriveFiles(id, true));
+                return self.update(Message::Attachments(AttachmentsMessage::SearchDriveFiles(id, true)));
             }
-            Message::SearchDriveFiles(id, append) if self.can_use_drive_picker(id) => {
+            AttachmentsMessage::SearchDriveFiles(id, append) if self.can_use_drive_picker(id) => {
                 let Some(session) = self.session.clone() else { return Task::none() };
-                if let Some(picker) = self.drive_picker.as_mut().filter(|picker| picker.course == id) {
+                if let Some(picker) = self.attachments.drive_picker.as_mut().filter(|picker| picker.course == id) {
                     let query = picker.query.trim().to_owned();
                     let page_token = if append {
                         if picker.loading || query != picker.submitted_query {
@@ -92,64 +117,64 @@ impl App {
                         picker.listed_tokens.clear();
                         None
                     };
-                    self.drive_picker_generation = self.drive_picker_generation.wrapping_add(1);
-                    let generation = self.drive_picker_generation;
+                    self.attachments.drive_picker_generation = self.attachments.drive_picker_generation.wrapping_add(1);
+                    let generation = self.attachments.drive_picker_generation;
                     picker.loading = true;
                     picker.error = None;
                     picker.submitted_query = query.clone();
                     let location = picker.location();
                     return Task::perform(async move { desktop_auth::list_drive_files(&session, location, query, page_token).await },
-                        move |result| Message::DriveFilesLoaded(id, generation, append, result));
+                        move |result| Message::Attachments(AttachmentsMessage::DriveFilesLoaded(id, generation, append, result)));
                 }
             }
-            Message::DriveFilesLoaded(id, generation, append, result) if generation == self.drive_picker_generation => {
-                if let Some(picker) = self.drive_picker.as_mut().filter(|picker| picker.course == id) {
+            AttachmentsMessage::DriveFilesLoaded(id, generation, append, result) if generation == self.attachments.drive_picker_generation => {
+                if let Some(picker) = self.attachments.drive_picker.as_mut().filter(|picker| picker.course == id) {
                     picker.loading = false;
                     match result {
                         Ok(page) => picker.accept_page(page, append),
                         Err(error) => picker.error = Some((append, error)),
                     }
                     if picker.needs_more_for_viewport() {
-                        return self.update(Message::SearchDriveFiles(id, true));
+                        return self.update(Message::Attachments(AttachmentsMessage::SearchDriveFiles(id, true)));
                     }
                 }
             }
-            Message::AttachExistingDriveFile(id, file_id) if self.can_use_drive_picker(id) && !self.has_pending_request() => {
-                if let Some(picker) = self.drive_picker.as_ref().filter(|picker| picker.course == id)
+            AttachmentsMessage::AttachExistingDriveFile(id, file_id) if self.can_use_drive_picker(id) && !self.has_pending_request() => {
+                if let Some(picker) = self.attachments.drive_picker.as_ref().filter(|picker| picker.course == id)
                     && let Some(file) = picker.file_page.as_ref()
                     .and_then(|page| page.files.iter().find(|file| file.id() == file_id))
                 {
                     if let Some(item) = picker.item {
                         let Some(session) = self.session.clone() else { return Task::none() };
                         let file = file.clone();
-                        self.sending_submission = true;
+                        self.student_work.sending_submission = true;
                         self.error = None;
                         self.notice = None;
                         return Task::perform(async move { desktop_auth::attach_submission_drive_file(&session, id, item, file).await },
-                            move |result| Message::SubmissionDriveFileAttached(id, result));
+                            move |result| Message::Attachments(AttachmentsMessage::SubmissionDriveFileAttached(id, result)));
                     }
-                    if let Some(draft) = self.stream_drafts.get_mut(&id)
+                    if let Some(draft) = self.stream.stream_drafts.get_mut(&id)
                         && !draft.files.iter().any(|existing| existing.id() == file_id)
                     {
                         draft.files.push(file.clone());
                     }
                 }
             }
-            Message::SubmissionDriveFileAttached(course, result) => {
-                self.sending_submission = false;
+            AttachmentsMessage::SubmissionDriveFileAttached(course, result) => {
+                self.student_work.sending_submission = false;
                 match result {
                     Ok(()) => {
                         self.notice = Some("Drive file attached to your work.".into());
-                        return self.update(Message::LoadDetail(DetailRead::Submissions(course)));
+                        return self.update(Message::Reads(ReadsMessage::LoadDetail(DetailRead::Submissions(course))));
                     }
                     Err(error) => {
                         self.error = Some(error);
-                        let refresh = self.update(Message::LoadDetail(DetailRead::Submissions(course)));
+                        let refresh = self.update(Message::Reads(ReadsMessage::LoadDetail(DetailRead::Submissions(course))));
                         return refresh;
                     }
                 }
             }
-            Message::OpenAttachment(url) if !self.verify_live_course_count => {
+            AttachmentsMessage::OpenAttachment(url) if !self.verify_live_course_count => {
                 if trusted_attachment_host(&url).is_none() {
                     self.error = Some("This attachment does not have a supported secure link.".into());
                 } else {
@@ -162,25 +187,25 @@ impl App {
                             .await
                             .is_ok_and(|status| status.success())
                     }, |opened| {
-                        if opened { Message::AttachmentOpened } else { Message::AttachmentFailed }
+                        if opened { Message::Reads(ReadsMessage::AttachmentOpened) } else { Message::Reads(ReadsMessage::AttachmentFailed) }
                     });
                 }
             }
-            Message::OpenDriveFile(id) if self.can_read_pages() && self.opening_drive_file.is_none() => {
+            AttachmentsMessage::OpenDriveFile(id) if self.can_read_pages() && self.attachments.opening_drive_file.is_none() => {
                 let Some(session) = self.session.clone() else { return Task::none(); };
                 self.error = None;
-                self.opening_drive_file = Some(id.clone());
+                self.attachments.opening_drive_file = Some(id.clone());
                 return Task::perform(async move {
                     let result = desktop_auth::lookup_drive_file_link(&session, &id).await;
                     (id, result)
-                }, |(id, result)| Message::DriveFileLinkLoaded(id, result));
+                }, |(id, result)| Message::Attachments(AttachmentsMessage::DriveFileLinkLoaded(id, result)));
             }
             #[cfg(target_os = "macos")]
-            Message::PreviewDriveFile(attachment) if self.can_read_pages() && !self.preparing_drive_preview => {
+            AttachmentsMessage::PreviewDriveFile(attachment) if self.can_read_pages() && !self.attachments.preparing_drive_preview => {
                 let (Some(session), Some(id)) = (self.session.clone(), attachment.drive_reference) else {
                     return Task::none();
                 };
-                self.preparing_drive_preview = true;
+                self.attachments.preparing_drive_preview = true;
                 self.error = None;
                 self.notice = Some("Preparing Quick Look preview…".into());
                 return Task::perform(async move {
@@ -188,11 +213,11 @@ impl App {
                         .map_err(|_| "Could not create a temporary preview folder.")?);
                     let path = desktop_auth::preview_drive_file(&session, &id, attachment.url.as_deref(), directory.path()).await?;
                     Ok((directory, path))
-                }, Message::DrivePreviewReady);
+                }, |value| Message::Attachments(AttachmentsMessage::DrivePreviewReady(value)));
             }
             #[cfg(target_os = "macos")]
-            Message::DrivePreviewReady(result) => {
-                self.preparing_drive_preview = false;
+            AttachmentsMessage::DrivePreviewReady(result) => {
+                self.attachments.preparing_drive_preview = false;
                 self.notice = None;
                 match result {
                     Ok((directory, path)) => {
@@ -209,19 +234,19 @@ impl App {
                             } else {
                                 Err("Quick Look couldn’t preview this file.".into())
                             }
-                        }, Message::DrivePreviewClosed);
+                        }, |value| Message::Attachments(AttachmentsMessage::DrivePreviewClosed(value)));
                     }
                     Err(error) => self.error = Some(error),
                 }
             }
-            Message::DrivePreviewClosed(Err(error)) => self.error = Some(error),
-            Message::DrivePreviewClosed(Ok(())) => {}
+            AttachmentsMessage::DrivePreviewClosed(Err(error)) => self.error = Some(error),
+            AttachmentsMessage::DrivePreviewClosed(Ok(())) => {}
             #[cfg(target_os = "macos")]
-            Message::SaveDriveFile(attachment) if self.can_read_pages() && !self.has_pending_request() => {
+            AttachmentsMessage::SaveDriveFile(attachment) if self.can_read_pages() && !self.has_pending_request() => {
                 let (Some(session), Some(id)) = (self.session.clone(), attachment.drive_reference.clone()) else {
                     return Task::none();
                 };
-                self.saving_drive_file = true;
+                self.attachments.saving_drive_file = true;
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move {
@@ -237,20 +262,20 @@ impl App {
                     };
                     desktop_auth::save_drive_file(&session, &id, attachment.url.as_deref(), &path).await?;
                     Ok(true)
-                }, Message::DriveFileSaved);
+                }, |value| Message::Attachments(AttachmentsMessage::DriveFileSaved(value)));
             }
-            Message::DriveFileSaved(result) => {
-                self.saving_drive_file = false;
+            AttachmentsMessage::DriveFileSaved(result) => {
+                self.attachments.saving_drive_file = false;
                 match result {
                     Ok(true) => self.notice = Some("File saved.".into()),
                     Ok(false) => {}
                     Err(error) => self.error = Some(error),
                 }
             }
-            Message::DriveFileLinkLoaded(id, result) if self.opening_drive_file.as_ref() == Some(&id) => {
-                self.opening_drive_file = None;
+            AttachmentsMessage::DriveFileLinkLoaded(id, result) if self.attachments.opening_drive_file.as_ref() == Some(&id) => {
+                self.attachments.opening_drive_file = None;
                 match result {
-                    Ok(url) => return self.update(Message::OpenAttachment(url)),
+                    Ok(url) => return self.update(Message::Attachments(AttachmentsMessage::OpenAttachment(url))),
                     Err(error) => self.error = Some(error),
                 }
             }

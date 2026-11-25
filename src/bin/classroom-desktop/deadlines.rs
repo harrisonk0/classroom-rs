@@ -19,14 +19,14 @@ impl App {
         let selected = classes.iter().find(|class| class.id == class_id).cloned();
         pick_list(classes, selected, on_select)
             .width(190).text_size(14).padding(8)
-            .style(|_, status| {
+            .style(|theme, status| {
                 let active = matches!(status, pick_list::Status::Active);
                 pick_list::Style {
-                    text_color: FG,
-                    placeholder_color: MUTED,
-                    handle_color: ACTIVE_FG,
-                    background: (if active { WHITE } else { ACTIVE_BG }).into(),
-                    border: border(if active { BORDER } else { ACTIVE_FG }, 1.0, 8.0),
+                    text_color: classroom_palette(theme).text,
+                    placeholder_color: appearance_color(theme, MUTED),
+                    handle_color: appearance_color(theme, ACTIVE_FG),
+                    background: (if active { classroom_palette(theme).background } else { appearance_color(theme, ACTIVE_BG) }).into(),
+                    border: border(appearance_color(theme, if active { BORDER } else { ACTIVE_FG }), 1.0, 8.0),
                 }
             })
             .into()
@@ -36,7 +36,7 @@ impl App {
         let mut by_day: BTreeMap<_, Vec<_>> = BTreeMap::new();
         if let Some(data) = &self.snapshot {
             for course in data.courses.iter().filter(|course| {
-                home_course(course) && self.calendar_class.is_none_or(|id| id == course.id)
+                home_course(course) && self.deadlines.calendar_class.is_none_or(|id| id == course.id)
             }) {
                 for item in data.coursework_for(course.id).unwrap_or_default() {
                     if let Some(date) = item.due_date(&Local)
@@ -54,8 +54,8 @@ impl App {
     }
 
     pub(super) fn calendar(&self) -> Element<'_, Message> {
-        let today = self.now.date_naive();
-        let monday = self.calendar_monday;
+        let today = self.deadlines.now.date_naive();
+        let monday = self.deadlines.calendar_monday;
         let sunday = monday + Days::new(6);
         let span = if monday.year() != sunday.year() {
             format!("{} – {}", monday.format("%-d %b %Y"), sunday.format("%-d %b %Y"))
@@ -65,24 +65,24 @@ impl App {
             format!("{}–{}", monday.day(), sunday.format("%-d %b %Y"))
         };
         let mut toolbar = row![
-            button("‹").padding([7, 12]).style(outline_style).on_press(Message::CalendarShift(-1)),
-            button("›").padding([7, 12]).style(outline_style).on_press(Message::CalendarShift(1)),
-            button("Today").padding([7, 12]).style(outline_style).on_press(Message::CalendarToday),
-            text(span).size(18).font(medium()).color(FG),
-            self.class_filter_picker(self.calendar_class, Message::CalendarFilter),
+            button("‹").padding([7, 12]).style(outline_style).on_press(Message::Deadlines(DeadlinesMessage::CalendarShift(-1))),
+            button("›").padding([7, 12]).style(outline_style).on_press(Message::Deadlines(DeadlinesMessage::CalendarShift(1))),
+            button("Today").padding([7, 12]).style(outline_style).on_press(Message::Deadlines(DeadlinesMessage::CalendarToday)),
+            text(span).size(18).font(medium()).style(move |theme| themed_text(theme, FG)),
+            self.class_filter_picker(self.deadlines.calendar_class, |value| Message::Deadlines(DeadlinesMessage::CalendarFilter(value))),
         ].spacing(9).align_y(Alignment::Center);
-        if let Some(calendar) = self.calendar_class.and_then(|course| self.class_calendar_button(course)) {
+        if let Some(calendar) = self.deadlines.calendar_class.and_then(|course| self.class_calendar_button(course)) {
             toolbar = toolbar.push(calendar);
         }
         let toolbar = toolbar.wrap().vertical_spacing(9);
 
         let items = self.calendar_items(monday);
-        let mut body = column![text("Calendar").size(27).color(FG), toolbar].spacing(14);
+        let mut body = column![text("Calendar").size(27).style(move |theme| themed_text(theme, FG)), toolbar].spacing(14);
         let status = self.page_read_status(PageRead::Assignments, self.assignments_loaded, "Loading due dates…");
         if let Some(status) = status {
             body = body.push(status);
         } else if items.is_empty() {
-            body = body.push(text("No work due this week.").size(14).color(MUTED));
+            body = body.push(text("No work due this week.").size(14).style(move |theme| themed_text(theme, MUTED)));
         }
 
         let week = responsive(move |size| {
@@ -93,7 +93,7 @@ impl App {
             for offset in 0..7 {
                 let date = monday + Days::new(offset);
                 let mut day = column![
-                    text(calendar_agenda_heading(date, today)).size(15).font(medium()).color(FG)
+                    text(calendar_agenda_heading(date, today)).size(15).font(medium()).style(move |theme| themed_text(theme, FG))
                 ].spacing(7);
                 for (item, course) in items.get(&date).into_iter().flatten() {
                     day = day.push(coursework_row(item, Some(&course.title)));
@@ -113,7 +113,7 @@ impl App {
         }
         let url = snapshot.courses.iter().find(|entry| entry.id == course)?.calendar_url.as_ref()?;
         Some(button(row![icon(Icon::Calendar, BLUE, 17), text("Google Calendar")].spacing(6).align_y(Alignment::Center))
-            .padding([8, 12]).style(outline_style).on_press(Message::OpenAttachment(url.clone())).into())
+            .padding([8, 12]).style(outline_style).on_press(Message::Attachments(AttachmentsMessage::OpenAttachment(url.clone()))).into())
     }
 
     fn calendar_grid<'a>(
@@ -126,37 +126,37 @@ impl App {
             let date = monday + Days::new(offset);
             let is_today = today == date;
             let heading = column![
-                text(date.format("%a").to_string()).size(12).color(MUTED),
+                text(date.format("%a").to_string()).size(12).style(move |theme| themed_text(theme, MUTED)),
                 text(date.day().to_string()).size(18).font(medium())
-                    .color(if is_today { ACTIVE_FG } else { FG }),
+                    .style(move |theme| themed_text(theme, if is_today { ACTIVE_FG } else { FG })),
             ].spacing(1).align_x(Alignment::Center);
             let mut day = column![
                 container(heading).width(Fill).center_x(Fill).padding([8, 2])
-                    .style(move |_| surface(if is_today { ACTIVE_BG } else { SOFT }, 6.0)),
+                    .style(move |theme| surface(appearance_color(theme, if is_today { ACTIVE_BG } else { SOFT }), 6.0)),
             ].spacing(5).width(Fill);
             for (item, course) in items.get(&date).into_iter().flatten() {
                 let accent = course_color(course);
                 let entry = row![
                     container(space().width(3).height(28)).style(move |_| surface(accent, 2.0)),
                     column![
-                        text(truncate(&item.title, 36)).size(13).color(FG).width(Fill)
+                        text(truncate(&item.title, 36)).size(13).style(move |theme| themed_text(theme, FG)).width(Fill)
                             .wrapping(text::Wrapping::WordOrGlyph),
-                        text(truncate(&course.title, 22)).size(11).color(MUTED).width(Fill)
+                        text(truncate(&course.title, 22)).size(11).style(move |theme| themed_text(theme, MUTED)).width(Fill)
                             .wrapping(text::Wrapping::WordOrGlyph),
                     ].spacing(3).width(Fill),
                 ].spacing(4).align_y(Alignment::Center);
                 let open = button(entry).padding([6, 4]).width(Fill).style(outline_style)
-                    .on_press(Message::OpenItem(item.course_id, item.id.clone()));
+                    .on_press(Message::Navigation(NavigationMessage::OpenItem(item.course_id, item.id.clone())));
                 let details = column![
-                    text(&item.title).size(14).font(medium()).color(FG),
-                    text(&course.title).size(13).color(MUTED),
-                    text(item.due_label.as_deref().unwrap_or_default()).size(13).color(MUTED),
+                    text(&item.title).size(14).font(medium()).style(move |theme| themed_text(theme, FG)),
+                    text(&course.title).size(13).style(move |theme| themed_text(theme, MUTED)),
+                    text(item.due_label.as_deref().unwrap_or_default()).size(13).style(move |theme| themed_text(theme, MUTED)),
                 ].spacing(3);
                 day = day.push(tooltip(open, details, tooltip::Position::Bottom)
-                    .style(|_| outline_surface(8.0)));
+                    .style(|theme| outline_surface(theme, 8.0)));
             }
             days = days.push(container(day).width(Length::FillPortion(1)).padding(4)
-                .style(|_| outline_surface(7.0)));
+                .style(|theme| outline_surface(theme, 7.0)));
         }
 
         days.into()
@@ -166,7 +166,7 @@ impl App {
         let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
         if let Some(data) = &self.snapshot {
             for course in data.courses.iter().filter(|course| {
-                home_course(course) && self.todo_class.is_none_or(|id| id == course.id)
+                home_course(course) && self.deadlines.todo_class.is_none_or(|id| id == course.id)
             }) {
                 for item in data.coursework_for(course.id).unwrap_or_default().iter().filter(|item| has_submission(item)) {
                     let status = item.submission.as_ref().map(|submission| submission.status);
@@ -193,33 +193,33 @@ impl App {
 
     pub(super) fn todo(&self) -> Element<'_, Message> {
         let filters = row(TodoFilter::ALL.into_iter().map(|filter| {
-            let active = self.todo_filter == filter;
+            let active = self.deadlines.todo_filter == filter;
             button(filter.label()).padding([8, 12]).style(move |theme, status| nav_style(theme, active, status))
-                .on_press(Message::SetTodoFilter(filter)).into()
+                .on_press(Message::Deadlines(DeadlinesMessage::SetTodoFilter(filter))).into()
         })).spacing(6);
-        let toolbar = row![filters, self.class_filter_picker(self.todo_class, Message::FilterTodoClass)]
+        let toolbar = row![filters, self.class_filter_picker(self.deadlines.todo_class, |value| Message::Deadlines(DeadlinesMessage::FilterTodoClass(value)))]
             .spacing(14).align_y(Alignment::Center).wrap().vertical_spacing(8);
-        let mut body = column![text("To-do").size(27).color(FG), toolbar].spacing(14);
+        let mut body = column![text("To-do").size(27).style(move |theme| themed_text(theme, FG)), toolbar].spacing(14);
         let status = self.page_read_status(PageRead::Assignments, self.assignments_loaded, "Loading assignments…");
         let pending = status.is_some();
         if let Some(status) = status {
             body = body.push(status);
         }
-        let groups = self.todo_items(self.now.date_naive(), self.todo_filter);
-        let standard = self.todo_filter.groups();
+        let groups = self.todo_items(self.deadlines.now.date_naive(), self.deadlines.todo_filter);
+        let standard = self.deadlines.todo_filter.groups();
         let sections = standard.iter().copied().chain(groups.keys().copied().filter(|group| !standard.contains(group)));
         for group in sections {
             let entries = groups.get(&group).map(Vec::as_slice).unwrap_or_default();
             if pending && entries.is_empty() { continue; }
-            let closed = self.collapsed_todo_groups.contains(&(self.todo_filter, group));
+            let closed = self.deadlines.collapsed_todo_groups.contains(&(self.deadlines.todo_filter, group));
             let heading = button(row![
-                text(group.label()).size(16).font(medium()).color(FG),
+                text(group.label()).size(16).font(medium()).style(move |theme| themed_text(theme, FG)),
                 space().width(Fill),
-                text(entries.len().to_string()).size(14).color(MUTED),
-                text(if entries.is_empty() || closed { "⌄" } else { "⌃" }).size(16).color(MUTED),
+                text(entries.len().to_string()).size(14).style(move |theme| themed_text(theme, MUTED)),
+                text(if entries.is_empty() || closed { "⌄" } else { "⌃" }).size(16).style(move |theme| themed_text(theme, MUTED)),
             ].spacing(12).align_y(Alignment::Center))
                 .style(outline_style).width(Fill).padding([10, 13])
-                .on_press_maybe((!entries.is_empty()).then_some(Message::ToggleTodoGroup(group)));
+                .on_press_maybe((!entries.is_empty()).then_some(Message::Deadlines(DeadlinesMessage::ToggleTodoGroup(group))));
             body = body.push(heading);
             if !closed {
                 for (item, course) in entries {
@@ -364,5 +364,28 @@ pub(super) struct ClassFilterOption {
 impl fmt::Display for ClassFilterOption {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.label)
+    }
+}
+
+pub(super) struct DeadlinesState {
+    pub(super) now: DateTime<Local>,
+    pub(super) todo_filter: TodoFilter,
+    pub(super) todo_class: Option<i64>,
+    pub(super) collapsed_todo_groups: BTreeSet<(TodoFilter, TodoGroup)>,
+    pub(super) calendar_monday: NaiveDate,
+    pub(super) calendar_class: Option<i64>,
+}
+
+impl DeadlinesState {
+    pub(super) fn new() -> Self {
+        let now = Local::now();
+        Self {
+            now,
+            todo_filter: TodoFilter::default(),
+            todo_class: None,
+            collapsed_todo_groups: BTreeSet::new(),
+            calendar_monday: monday_of(now.date_naive()),
+            calendar_class: None,
+        }
     }
 }

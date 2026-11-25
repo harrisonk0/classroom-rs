@@ -1,25 +1,46 @@
 use super::*;
 
+#[derive(Clone)]
+pub(in crate::desktop) enum CommentsMessage {
+    EditComment(i64, i64, text_editor::Action),
+    OpenCommentMentions(i64, i64),
+    EmailClassMember(i64, i64),
+    ClassMemberEmailLoaded(u64, i64, i64, Result<Vec<desktop_auth::ClassMention>, String>),
+    ClassMemberEmailOpened(bool),
+    CommentMentionsLoaded(u64, i64, i64, Result<Vec<desktop_auth::ClassMention>, String>),
+    InsertCommentMention(i64, i64, i64),
+    CloseCommentMentions,
+    PostComment(i64, i64),
+    EditPrivateComment(i64, i64, text_editor::Action),
+    PostPrivateComment(i64, i64),
+    ConfirmDeleteComment(CommentTarget),
+    CancelDeleteComment,
+    DeleteComment(CommentTarget),
+    CommentDeleted(CommentTarget, Result<(), String>),
+    PrivateCommentPosted(i64, i64, Result<(), String>),
+    CommentPosted(i64, i64, Result<(), String>),
+}
+
 impl App {
-    pub(super) fn update_comments(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_comments(&mut self, message: CommentsMessage) -> Task<Message> {
         match message {
-            Message::EditPrivateComment(course, item, action)
-                if self.can_compose_comment(course, item) && !self.posting_comment =>
+            CommentsMessage::EditPrivateComment(course, item, action)
+                if self.can_compose_comment(course, item) && !self.comments.posting_comment =>
             {
-                edit_comment_draft(&mut self.private_drafts, (course, item), action);
+                edit_comment_draft(&mut self.comments.private_drafts, (course, item), action);
             }
-            Message::ConfirmDeleteComment(target) if self.may_delete_comment(target) => {
-                self.confirming_comment_delete = Some(target);
+            CommentsMessage::ConfirmDeleteComment(target) if self.may_delete_comment(target) => {
+                self.comments.confirming_comment_delete = Some(target);
             }
-            Message::CancelDeleteComment => self.confirming_comment_delete = None,
-            Message::DeleteComment(target) if self.confirming_comment_delete == Some(target)
+            CommentsMessage::CancelDeleteComment => self.comments.confirming_comment_delete = None,
+            CommentsMessage::DeleteComment(target) if self.comments.confirming_comment_delete == Some(target)
                 && self.may_delete_comment(target) && !self.has_pending_request() =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
                 let Some(comment) = self.displayed_comment(target) else { return Task::none(); };
                 let moderation_author = if self.owns_comment(comment) { None } else { comment.author_id };
-                self.confirming_comment_delete = None;
-                self.deleting_comment = Some(target);
+                self.comments.confirming_comment_delete = None;
+                self.comments.deleting_comment = Some(target);
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move {
@@ -28,15 +49,15 @@ impl App {
                     } else {
                         desktop_auth::delete_own_comment(&session, target.course, target.item, target.id, target.audience).await
                     }
-                }, move |result| Message::CommentDeleted(target, result));
+                }, move |result| Message::Comments(CommentsMessage::CommentDeleted(target, result)));
             }
-            Message::CommentDeleted(target, result) if self.deleting_comment == Some(target) => {
-                self.deleting_comment = None;
+            CommentsMessage::CommentDeleted(target, result) if self.comments.deleting_comment == Some(target) => {
+                self.comments.deleting_comment = None;
                 let id = target.id.to_string();
                 match result {
                     Ok(()) => {
                         let comments = if target.audience == CommentAudience::Private {
-                            self.private_feedback.get_mut(&(target.course, target.item))
+                            self.comments.private_feedback.get_mut(&(target.course, target.item))
                         } else {
                             self.snapshot.as_mut().and_then(|snapshot| snapshot.coursework.get_mut(&target.course))
                                 .and_then(|items| items.iter_mut().find(|item| item.id.parse::<i64>().ok() == Some(target.item)))
@@ -56,62 +77,62 @@ impl App {
                                 CommentAudience::Class => DetailRead::Comments(target.course, target.item),
                                 CommentAudience::Private => DetailRead::PrivateFeedback(target.course, target.item),
                             };
-                            return self.update(Message::LoadDetail(read));
+                            return self.update(Message::Reads(ReadsMessage::LoadDetail(read)));
                         }
                     }
                 }
             }
-            Message::PostPrivateComment(course, item)
+            CommentsMessage::PostPrivateComment(course, item)
                 if !self.has_pending_request() && self.can_compose_comment(course, item)
-                    && !self.private_unconfirmed.contains(&(course, item)) =>
+                    && !self.comments.private_unconfirmed.contains(&(course, item)) =>
             {
                 if let (Some(session), Some(draft)) = (self.session.clone(),
-                    self.private_drafts.get(&(course, item)).map(text_editor::Content::text)
+                    self.comments.private_drafts.get(&(course, item)).map(text_editor::Content::text)
                         .filter(|draft| !draft.trim().is_empty()))
                 {
-                    self.posting_comment = true;
+                    self.comments.posting_comment = true;
                     self.error = None;
                     self.notice = None;
                     return Task::perform(async move {
                         desktop_auth::post_private_feedback(&session, course, item, draft).await
-                    }, move |result| Message::PrivateCommentPosted(course, item, result));
+                    }, move |result| Message::Comments(CommentsMessage::PrivateCommentPosted(course, item, result)));
                 }
             }
-            Message::PrivateCommentPosted(course, item, result) => {
-                self.posting_comment = false;
+            CommentsMessage::PrivateCommentPosted(course, item, result) => {
+                self.comments.posting_comment = false;
                 match result {
                     Ok(()) => {
-                        self.private_drafts.remove(&(course, item));
+                        self.comments.private_drafts.remove(&(course, item));
                         self.notice = Some("Private comment sent.".into());
-                        return self.update(Message::LoadDetail(DetailRead::PrivateFeedback(course, item)));
+                        return self.update(Message::Reads(ReadsMessage::LoadDetail(DetailRead::PrivateFeedback(course, item))));
                     }
                     Err(error) => {
-                        self.private_unconfirmed.insert((course, item));
+                        self.comments.private_unconfirmed.insert((course, item));
                         self.error = Some(error);
                         self.queued_page_load = true;
                     }
                 }
             }
-            Message::EditComment(course, item, action)
-                if self.can_compose_class_comment(course, item) && !self.posting_comment =>
+            CommentsMessage::EditComment(course, item, action)
+                if self.can_compose_class_comment(course, item) && !self.comments.posting_comment =>
             {
-                edit_comment_draft(&mut self.comment_drafts, (course, item), action);
+                edit_comment_draft(&mut self.comments.comment_drafts, (course, item), action);
             }
-            Message::EmailClassMember(course, member) if self.can_email_class_member(course, member)
-                && self.people_email_pending.is_none() && !self.has_pending_request() =>
+            CommentsMessage::EmailClassMember(course, member) if self.can_email_class_member(course, member)
+                && self.people.people_email_pending.is_none() && !self.has_pending_request() =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
-                self.people_email_generation = self.people_email_generation.wrapping_add(1);
-                let generation = self.people_email_generation;
-                self.people_email_pending = Some((course, member));
+                self.people.people_email_generation = self.people.people_email_generation.wrapping_add(1);
+                let generation = self.people.people_email_generation;
+                self.people.people_email_pending = Some((course, member));
                 self.error = None;
                 return Task::perform(async move { desktop_auth::load_class_mentions(&session, course).await },
-                    move |result| Message::ClassMemberEmailLoaded(generation, course, member, result));
+                    move |result| Message::Comments(CommentsMessage::ClassMemberEmailLoaded(generation, course, member, result)));
             }
-            Message::ClassMemberEmailLoaded(generation, course, member, result)
-                if generation == self.people_email_generation && self.people_email_pending == Some((course, member)) =>
+            CommentsMessage::ClassMemberEmailLoaded(generation, course, member, result)
+                if generation == self.people.people_email_generation && self.people.people_email_pending == Some((course, member)) =>
             {
-                self.people_email_pending = None;
+                self.people.people_email_pending = None;
                 if !self.can_email_class_member(course, member) { return Task::none(); }
                 match result {
                     Ok(members) => {
@@ -123,27 +144,27 @@ impl App {
                             tokio::process::Command::new("/usr/bin/open").arg(url)
                                 .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
                                 .status().await.is_ok_and(|status| status.success())
-                        }, Message::ClassMemberEmailOpened);
+                        }, |value| Message::Comments(CommentsMessage::ClassMemberEmailOpened(value)));
                     }
                     Err(error) => self.error = Some(error),
                 }
             }
-            Message::ClassMemberEmailOpened(false) => self.error = Some("The email app couldn't be opened.".into()),
-            Message::ClassMemberEmailOpened(true) => {}
-            Message::OpenCommentMentions(course, item) if self.can_compose_class_comment(course, item)
+            CommentsMessage::ClassMemberEmailOpened(false) => self.error = Some("The email app couldn't be opened.".into()),
+            CommentsMessage::ClassMemberEmailOpened(true) => {}
+            CommentsMessage::OpenCommentMentions(course, item) if self.can_compose_class_comment(course, item)
                 && !self.has_pending_request() =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
-                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
-                let generation = self.comment_mentions_generation;
-                self.comment_mentions = Some(CommentMentions { course, item, entries: None, error: None });
+                self.comments.comment_mentions_generation = self.comments.comment_mentions_generation.wrapping_add(1);
+                let generation = self.comments.comment_mentions_generation;
+                self.comments.comment_mentions = Some(CommentMentions { course, item, entries: None, error: None });
                 return Task::perform(async move { desktop_auth::load_class_mentions(&session, course).await },
-                    move |result| Message::CommentMentionsLoaded(generation, course, item, result));
+                    move |result| Message::Comments(CommentsMessage::CommentMentionsLoaded(generation, course, item, result)));
             }
-            Message::CommentMentionsLoaded(generation, course, item, result)
-                if generation == self.comment_mentions_generation && self.can_compose_class_comment(course, item) =>
+            CommentsMessage::CommentMentionsLoaded(generation, course, item, result)
+                if generation == self.comments.comment_mentions_generation && self.can_compose_class_comment(course, item) =>
             {
-                if let Some(picker) = self.comment_mentions.as_mut()
+                if let Some(picker) = self.comments.comment_mentions.as_mut()
                     .filter(|picker| picker.course == course && picker.item == item)
                 {
                     match result {
@@ -152,16 +173,16 @@ impl App {
                     }
                 }
             }
-            Message::InsertCommentMention(course, item, member) if self.can_compose_class_comment(course, item)
+            CommentsMessage::InsertCommentMention(course, item, member) if self.can_compose_class_comment(course, item)
                 && !self.has_pending_request() =>
             {
-                let Some(email) = self.comment_mentions.as_ref()
+                let Some(email) = self.comments.comment_mentions.as_ref()
                     .filter(|picker| picker.course == course && picker.item == item)
                     .and_then(|picker| picker.entries.as_ref())
                     .and_then(|entries| entries.iter().find(|entry| entry.id == member))
                     .map(|entry| entry.email.clone())
                     else { return Task::none(); };
-                let draft = self.comment_drafts.entry((course, item)).or_insert_with(text_editor::Content::new);
+                let draft = self.comments.comment_drafts.entry((course, item)).or_insert_with(text_editor::Content::new);
                 let mut value = draft.text();
                 append_comment_mention(&mut value, &email);
                 *draft = text_editor::Content::with_text(&value);
@@ -170,40 +191,40 @@ impl App {
                         column: value.rsplit('\n').next().map_or(0, str::len) },
                     selection: None,
                 });
-                self.comment_mentions = None;
+                self.comments.comment_mentions = None;
             }
-            Message::CloseCommentMentions => {
-                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
-                self.comment_mentions = None;
+            CommentsMessage::CloseCommentMentions => {
+                self.comments.comment_mentions_generation = self.comments.comment_mentions_generation.wrapping_add(1);
+                self.comments.comment_mentions = None;
             }
-            Message::PostComment(course, item)
+            CommentsMessage::PostComment(course, item)
                 if !self.has_pending_request() && self.can_compose_class_comment(course, item)
-                    && !self.comment_unconfirmed.contains(&(course, item)) =>
+                    && !self.comments.comment_unconfirmed.contains(&(course, item)) =>
             {
                 if let (Some(session), Some(draft)) = (self.session.clone(),
-                    self.comment_drafts.get(&(course, item)).map(text_editor::Content::text)
+                    self.comments.comment_drafts.get(&(course, item)).map(text_editor::Content::text)
                         .filter(|draft| !draft.trim().is_empty()))
                 {
-                    self.posting_comment = true;
+                    self.comments.posting_comment = true;
                     self.error = None;
                     self.notice = None;
                     return Task::perform(async move {
                         desktop_auth::post_class_comment(&session, course, item, draft).await
-                    }, move |result| Message::CommentPosted(course, item, result));
+                    }, move |result| Message::Comments(CommentsMessage::CommentPosted(course, item, result)));
                 }
             }
-            Message::CommentPosted(course, item, result) => {
-                self.posting_comment = false;
+            CommentsMessage::CommentPosted(course, item, result) => {
+                self.comments.posting_comment = false;
                 match result {
                     Ok(()) => {
-                        self.comment_drafts.remove(&(course, item));
+                        self.comments.comment_drafts.remove(&(course, item));
                         self.notice = Some("Class comment posted.".into());
-                        return self.update(Message::LoadDetail(DetailRead::Comments(course, item)));
+                        return self.update(Message::Reads(ReadsMessage::LoadDetail(DetailRead::Comments(course, item))));
                     }
                     Err(error) => {
-                        self.stream_access.remove(&course);
+                        self.stream.stream_access.remove(&course);
                         self.page_errors.remove(&PageRead::StreamAccess(course));
-                        self.comment_unconfirmed.insert((course, item));
+                        self.comments.comment_unconfirmed.insert((course, item));
                         self.error = Some(error);
                         self.queued_page_load = true;
                     }

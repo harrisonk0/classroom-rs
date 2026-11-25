@@ -10,7 +10,7 @@ pub(super) fn stream_editor_binding(course: i64, event: text_editor::KeyPress) -
             _ => None,
         };
         if let Some(format) = format {
-            return Some(text_editor::Binding::Custom(Message::FormatStreamDraft(course, format)));
+            return Some(text_editor::Binding::Custom(Message::Stream(StreamMessage::FormatStreamDraft(course, format))));
         }
     }
     text_editor::Binding::from_key_press(event)
@@ -40,7 +40,7 @@ pub(super) fn formatted_description(body: &str, styles: &[DescriptionStyle], bul
             .map(|style| DescriptionStyle { start: style.start - start, ..*style }));
         let content = formatted_inline(line, &inline);
         if bullets.contains(&start) {
-            paragraphs = paragraphs.push(row![text("•").size(15).color(FG).width(15), content].spacing(3));
+            paragraphs = paragraphs.push(row![text("•").size(15).style(move |theme| themed_text(theme, FG)).width(15), content].spacing(3));
         } else if line.is_empty() {
             paragraphs = paragraphs.push(space().height(15));
         } else {
@@ -52,7 +52,7 @@ pub(super) fn formatted_description(body: &str, styles: &[DescriptionStyle], bul
 
 pub(super) fn formatted_inline(body: &str, styles: &[DescriptionStyle]) -> Element<'static, Message> {
     if styles.iter().all(|style| style.is_plain()) {
-        return text(body.to_owned()).size(15).color(FG).wrapping(text::Wrapping::WordOrGlyph).into();
+        return text(body.to_owned()).size(15).style(move |theme| themed_text(theme, FG)).wrapping(text::Wrapping::WordOrGlyph).into();
     }
     let mut runs = BTreeMap::from([(0, DescriptionStyle::default())]);
     runs.extend(styles.iter().copied().filter(|style| style.start < body.len() && body.is_char_boundary(style.start))

@@ -27,12 +27,12 @@ impl App {
             container(
                 row![
                     icon(Icon::Info, foreground, 19),
-                    text(message).size(14).color(foreground).width(Fill)
+                    text(message).size(14).style(move |theme| themed_text(theme, foreground)).width(Fill)
                 ]
                 .spacing(11)
                 .align_y(Alignment::Center),
             )
-            .style(move |_| surface(background, 9.0))
+            .style(move |theme| surface(appearance_color(theme, background), 9.0))
             .padding([11, 14])
             .width(Fill)
             .into()
@@ -57,24 +57,24 @@ impl App {
         ])
         .width(Fill)
         .height(Fill)
-        .style(|_| surface(WHITE, 0.0))
+        .style(|theme| surface(classroom_palette(theme).background, 0.0))
         .into()
     }
 
     fn classroom_link_form<'a>(&'a self, value: &'a str) -> Element<'a, Message> {
         let ready = !self.has_pending_request() && !self.checking_classroom_link && !value.trim().is_empty();
         let input = text_input("Paste a classroom.google.com link", value).padding(9).width(Fill)
-            .on_input(Message::EditClassroomLink).on_submit_maybe(ready.then_some(Message::OpenClassroomLink));
+            .on_input(|value| Message::Navigation(NavigationMessage::EditClassroomLink(value))).on_submit_maybe(ready.then_some(Message::Navigation(NavigationMessage::OpenClassroomLink)));
         container(column![
-            text("Open Classroom link").size(17).font(medium()).color(FG),
+            text("Open Classroom link").size(17).font(medium()).style(move |theme| themed_text(theme, FG)),
             row![
                 input,
-                button("Cancel").style(quiet_style).padding([7, 9]).on_press(Message::CloseClassroomLink),
+                button("Cancel").style(quiet_style).padding([7, 9]).on_press(Message::Navigation(NavigationMessage::CloseClassroomLink)),
                 button(if self.checking_classroom_link { "Checking account…" } else { "Open" })
                     .style(primary_style).padding([8, 12])
-                    .on_press_maybe(ready.then_some(Message::OpenClassroomLink)),
+                    .on_press_maybe(ready.then_some(Message::Navigation(NavigationMessage::OpenClassroomLink))),
             ].spacing(8).align_y(Alignment::Center),
-        ].spacing(8)).padding(12).style(|_| outline_surface(8.0)).into()
+        ].spacing(8)).padding(12).style(|theme| outline_surface(theme, 8.0)).into()
     }
 
     pub(super) fn invalidate_classroom_link_check(&mut self) {
@@ -111,18 +111,18 @@ impl App {
                 self.checking_classroom_link = true;
                 let generation = self.classroom_link_generation;
                 Task::perform(async move { desktop_auth::own_work_link(&session, course).await },
-                    move |result| Message::ClassroomWorkLinkChecked(generation, target, result))
+                    move |result| Message::Navigation(NavigationMessage::ClassroomWorkLinkChecked(generation, target, result)))
             }
             ClassroomLink::Course { classwork, .. } => {
-                let navigate = self.update(Message::Navigate(Screen::Course(course)));
-                Task::batch([navigate, self.update(Message::SetTab(if classwork { Tab::Classwork } else { Tab::Stream }))])
+                let navigate = self.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(course))));
+                Task::batch([navigate, self.update(Message::Navigation(NavigationMessage::SetTab(if classwork { Tab::Classwork } else { Tab::Stream })))])
             }
             ClassroomLink::Topic { topic, .. } => {
-                let navigate = self.update(Message::Navigate(Screen::Course(course)));
-                let tab = self.update(Message::SetTab(Tab::Classwork));
-                let topic = self.update(Message::SelectTopic(Some(topic.to_string())));
+                let navigate = self.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(course))));
+                let tab = self.update(Message::Navigation(NavigationMessage::SetTab(Tab::Classwork)));
+                let topic = self.update(Message::Navigation(NavigationMessage::SelectTopic(Some(topic.to_string()))));
                 let refresh = if needs_reload && self.can_read_pages() {
-                    self.update(Message::LoadCoursework(course))
+                    self.update(Message::Reads(ReadsMessage::LoadCoursework(course)))
                 } else {
                     Task::none()
                 };
@@ -130,10 +130,10 @@ impl App {
             }
             ClassroomLink::Item { item, kind, .. } => {
                 self.tab = if kind == ItemLinkKind::Announcement { Tab::Stream } else { Tab::Classwork };
-                let open = self.update(Message::OpenItem(course, item.to_string()));
+                let open = self.update(Message::Navigation(NavigationMessage::OpenItem(course, item.to_string())));
                 self.previous_screen = Some(Screen::Course(course));
                 let refresh = if needs_reload && self.can_read_pages() {
-                    self.update(Message::LoadCoursework(course))
+                    self.update(Message::Reads(ReadsMessage::LoadCoursework(course)))
                 } else {
                     Task::none()
                 };
@@ -146,40 +146,40 @@ impl App {
         let toggle = button(icon(Icon::Menu, MUTED, 21))
             .padding(12)
             .style(quiet_style)
-            .on_press(Message::ToggleNavigation);
+            .on_press(Message::Navigation(NavigationMessage::ToggleNavigation));
         let brand = button(
-            row![classroom_mark(), text("Classroom").size(22).color(MUTED)]
+            row![classroom_mark(), text("Classroom").size(22).style(move |theme| themed_text(theme, MUTED))]
                 .spacing(9)
                 .align_y(Alignment::Center),
         )
         .padding([7, 9])
         .style(quiet_style)
-        .on_press(Message::Navigate(Screen::Home));
+        .on_press(Message::Navigation(NavigationMessage::Navigate(Screen::Home)));
         let account: Element<'_, Message> = if let Some(session) = &self.session {
             let status: Element<'_, Message> = if session.needs_sign_in() {
                 button(if self.busy { "Signing in…" } else { "Reconnect" })
                     .style(outline_style).padding([8, 12])
-                    .on_press_maybe((!self.has_pending_request()).then_some(Message::Reconnect))
+                    .on_press_maybe((!self.has_pending_request()).then_some(Message::Session(SessionMessage::Reconnect)))
                     .into()
             } else {
                 text(if self.snapshot.as_ref().is_some_and(|data| data.source == SnapshotSource::Cache) {
                     "Viewing offline copy"
                 } else {
                     "Connected"
-                }).size(13).color(color!(0x137333)).into()
+                }).size(13).style(move |theme| themed_text(theme, color!(0x137333))).into()
             };
             let mut actions = row![
                 status,
                 button("Join class").style(quiet_style).padding([8, 12])
-                    .on_press_maybe(self.can_change_membership().then_some(Message::Navigate(Screen::Join))),
+                    .on_press_maybe(self.can_change_membership().then_some(Message::Navigation(NavigationMessage::Navigate(Screen::Join)))),
             ];
             if self.can_create_class() {
                 actions = actions.push(button("Create class").style(quiet_style).padding([8, 12])
-                    .on_press_maybe((!self.has_pending_request()).then_some(Message::Navigate(Screen::CreateClass))));
+                    .on_press_maybe((!self.has_pending_request()).then_some(Message::Navigation(NavigationMessage::Navigate(Screen::CreateClass)))));
             }
             actions.push(
                 button("Sign out").style(quiet_style).padding([8, 12]).on_press_maybe(
-                    (!self.has_pending_request()).then_some(Message::Disconnect)
+                    (!self.has_pending_request()).then_some(Message::Session(SessionMessage::Disconnect))
                 )
             ).push(avatar(first_initial(self.email.trim()), color!(0x1b6a54), 34.0, 15.0))
             .spacing(9)
@@ -189,7 +189,7 @@ impl App {
             row![
                 pill("Demo data", color!(0xfef7e0), color!(0x6d4e00)),
                 button("Exit demo").style(quiet_style).padding([8, 12])
-                    .on_press(Message::Disconnect),
+                    .on_press(Message::Session(SessionMessage::Disconnect)),
             ]
             .spacing(12)
             .align_y(Alignment::Center)
@@ -197,14 +197,14 @@ impl App {
         } else if self.snapshot.is_some() {
             row![
                 pill("Offline copy", SOFT, MUTED),
-                button("Close").style(quiet_style).padding([8, 12]).on_press(Message::Disconnect),
+                button("Close").style(quiet_style).padding([8, 12]).on_press(Message::Session(SessionMessage::Disconnect)),
             ].spacing(8).align_y(Alignment::Center).into()
         } else {
             pill("Signed out", SOFT, MUTED)
         };
         let links: Element<'_, Message> = if self.snapshot.is_some() && !self.verify_live_course_count {
             button("Open link…").style(quiet_style).padding([8, 10])
-                .on_press(Message::ShowClassroomLink).into()
+                .on_press(Message::Navigation(NavigationMessage::ShowClassroomLink)).into()
         } else {
             space().into()
         };
@@ -223,7 +223,7 @@ impl App {
         if let Some(data) = &self.snapshot {
             if data.courses.iter().any(|course| home_course(course)) {
                 course_entries = course_entries.push(
-                    container(text("Enrolled").size(13).font(medium()).color(MUTED))
+                    container(text("Enrolled").size(13).font(medium()).style(move |theme| themed_text(theme, MUTED)))
                         .padding(Padding {
                             top: 10.0, right: 12.0, bottom: 6.0, left: 17.0,
                         })
@@ -234,11 +234,11 @@ impl App {
                 course_entries = course_entries.push(
                     button(row![
                         avatar(first_initial(&course.title), course_color(course), 26.0, 12.0),
-                        text(&course.title).size(14).color(
+                        text(&course.title).size(14).style(move |theme| themed_text(theme,
                             if self.is_selected_course(course.id) { ACTIVE_FG } else { FG }
-                        ).width(Fill),
+                        )).width(Fill),
                     ].spacing(11).align_y(Alignment::Center))
-                    .on_press(Message::Navigate(destination))
+                    .on_press(Message::Navigation(NavigationMessage::Navigate(destination)))
                     .style(move |theme, status| nav_style(theme, self.is_selected_course(course.id), status))
                     .padding([9, 13])
                     .width(Fill)
@@ -277,12 +277,12 @@ impl App {
                 .any(|course| course.id == id && course.state == CourseState::Archived)));
         let active = self.screen == destination || destination == Screen::Archived && archived_course;
         let color = if active { ACTIVE_FG } else { MUTED };
-        button(row![icon(glyph, color, 20), text(label).color(color).size(15)]
+        button(row![icon(glyph, color, 20), text(label).style(move |theme| themed_text(theme, color)).size(15)]
             .spacing(14).align_y(Alignment::Center))
             .style(move |theme, status| nav_style(theme, active, status))
             .width(Fill)
             .padding([11, 14])
-            .on_press(Message::Navigate(destination))
+            .on_press(Message::Navigation(NavigationMessage::Navigate(destination)))
             .into()
     }
 }

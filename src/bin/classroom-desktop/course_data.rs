@@ -5,23 +5,23 @@ impl App {
         self.class_folders_generation = self.class_folders_generation.wrapping_add(1);
         self.class_folders.clear();
         self.class_roles.clear();
-        self.teacher_drafts.clear();
-        self.open_teacher_draft = None;
-        self.assignment_editor = None;
-        self.assignment_publication = None;
-        self.teacher_work = None;
-        self.teacher_feedback.clear();
-        self.gradebooks.clear();
+        self.classwork.teacher_drafts.clear();
+        self.classwork.open_teacher_draft = None;
+        self.classwork.assignment_editor = None;
+        self.classwork.assignment_publication = None;
+        self.grading.teacher_work = None;
+        self.grading.teacher_feedback.clear();
+        self.grading.gradebooks.clear();
         self.class_stream_settings = None;
-        self.student_muting.clear();
-        self.pending_student_mute = None;
-        self.teacher_topics.clear();
-        self.topic_editor = None;
-        self.item_topic_editor = None;
-        self.topic_manager = false;
-        self.gradebook_student = None;
-        self.gradebook_edit_mode = false;
-        self.gradebook_edit = None;
+        self.people.student_muting.clear();
+        self.people.pending_student_mute = None;
+        self.classwork.teacher_topics.clear();
+        self.classwork.topic_editor = None;
+        self.classwork.item_topic_editor = None;
+        self.classwork.topic_manager = false;
+        self.grading.gradebook_student = None;
+        self.grading.gradebook_edit_mode = false;
+        self.grading.gradebook_edit = None;
         self.page_errors.retain(|read, _| !matches!(read, PageRead::Detail(DetailRead::TeacherDrafts(_) | DetailRead::TeacherGradebook(_))));
         self.class_folders_failed = false;
     }
@@ -39,7 +39,7 @@ impl App {
             .map(|course| course.id).collect();
         let generation = self.class_folders_generation;
         Task::perform(async move { desktop_auth::load_own_class_details(&session, courses).await },
-            move |result| Message::ClassFoldersLoaded(generation, result))
+            move |result| Message::Reads(ReadsMessage::ClassFoldersLoaded(generation, result)))
     }
 
     pub(super) fn fetch_class_creation_permission(&mut self) -> Task<Message> {
@@ -48,7 +48,7 @@ impl App {
         let generation = self.class_creation_generation;
         if let Some(session) = self.session.clone().filter(|_| self.can_read_pages()) {
             Task::perform(async move { desktop_auth::can_create_classes(&session).await },
-                move |result| Message::ClassCreationPermission(generation, result))
+                move |result| Message::Courses(CoursesMessage::ClassCreationPermission(generation, result)))
         } else {
             Task::none()
         }
@@ -67,7 +67,7 @@ impl App {
         self.teachers_generation = self.teachers_generation.wrapping_add(1);
         let generation = self.teachers_generation;
         Task::perform(async move { desktop_auth::load_class_teacher_names(&session, &courses).await },
-            move |result| Message::ClassTeachersLoaded(generation, result))
+            move |result| Message::Reads(ReadsMessage::ClassTeachersLoaded(generation, result)))
     }
 
     pub(super) fn class_folder_url(&self, id: i64) -> Option<&str> {
@@ -80,9 +80,9 @@ impl App {
 
     pub(super) fn reset_artwork(&mut self) {
         self.artwork.clear();
-        self.stream_profiles_requested.clear();
-        self.stream_profiles.clear();
-        self.stream_profile_pictures.clear();
+        self.stream.stream_profiles_requested.clear();
+        self.stream.stream_profiles.clear();
+        self.stream.stream_profile_pictures.clear();
         self.artwork_generation = self.artwork_generation.wrapping_add(1);
     }
 
@@ -97,14 +97,14 @@ impl App {
         let ids: BTreeSet<_> = snapshot.coursework_for(course).unwrap_or_default().iter()
             .filter(|item| display.is_none_or(|display| display.shows(item.kind)))
             .filter_map(|item| item.author_id)
-            .filter(|id| !self.stream_profiles_requested.contains(id))
+            .filter(|id| !self.stream.stream_profiles_requested.contains(id))
             .collect();
         let ids: BTreeSet<_> = ids.into_iter().take(64).collect();
         if ids.is_empty() { return Task::none(); }
-        self.stream_profiles_requested.extend(ids.iter().copied());
+        self.stream.stream_profiles_requested.extend(ids.iter().copied());
         let generation = self.artwork_generation;
         Task::perform(async move { desktop_auth::load_stream_profiles(&session, ids).await },
-            move |result| Message::StreamProfilesLoaded(generation, result))
+            move |result| Message::Reads(ReadsMessage::StreamProfilesLoaded(generation, result)))
     }
 
     pub(super) fn fetch_artwork(&self) -> Task<Message> {
@@ -124,7 +124,7 @@ impl App {
         }
         let generation = self.artwork_generation;
         Task::run(desktop_auth::artwork_updates(urls), move |(url, image)| {
-            Message::ArtworkLoaded(generation, url, image)
+            Message::Reads(ReadsMessage::ArtworkLoaded(generation, url, image))
         })
     }
 
@@ -133,9 +133,9 @@ impl App {
     }
 
     pub(super) fn reset_personal_copy(&mut self) {
-        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
-        self.personal_copy_checks.clear();
-        self.pending_personal_copy = None;
+        self.attachments.personal_copy_generation = self.attachments.personal_copy_generation.wrapping_add(1);
+        self.attachments.personal_copy_checks.clear();
+        self.attachments.pending_personal_copy = None;
     }
 
     pub(super) fn install_snapshot(&mut self, snapshot: Snapshot) {
@@ -147,7 +147,7 @@ impl App {
         self.reset_stream_access();
         if self.snapshot.as_ref().is_some_and(|old| old.source != snapshot.source) {
             self.reset_assignment_reads();
-            self.submissions_checked.clear();
+            self.student_work.submissions_checked.clear();
         }
         if let Screen::Course(id) | Screen::Item(id) = self.screen
             && !snapshot.courses.iter().any(|course| course.id == id)
@@ -156,7 +156,7 @@ impl App {
             self.screen = Screen::Home;
             self.tab = Tab::Stream;
         }
-        for filter in [&mut self.calendar_class, &mut self.todo_class] {
+        for filter in [&mut self.deadlines.calendar_class, &mut self.deadlines.todo_class] {
             if filter.is_some_and(|id| !snapshot.courses.iter()
                 .any(|course| course.id == id && course.state.shows_on_home()))
             {

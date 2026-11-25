@@ -1,9 +1,29 @@
 use super::*;
 
+#[derive(Clone)]
+pub(in crate::desktop) enum ReadsMessage {
+    LoadCoursework(i64),
+    LoadStreamAccess(i64),
+    StreamAccessLoaded(u64, i64, Result<(i64, StreamAccess), String>),
+    LoadAssignments,
+    AssignmentLoaded(u64, desktop_auth::AssignmentRefresh),
+    CourseworkLoaded(i64, Result<Arc<CourseContents>, String>),
+    LoadDetail(DetailRead),
+    DetailLoaded(DetailRead, Result<DetailData, String>),
+    ClassFoldersLoaded(u64, Result<desktop_auth::OwnClassDetails, String>),
+    ClassTeachersLoaded(u64, Result<BTreeMap<i64, String>, String>),
+    RetryClassFolders,
+    AttachmentOpened,
+    AttachmentFailed,
+    ArtworkLoaded(u64, String, image::Handle),
+    StreamProfilesLoaded(u64, Result<BTreeMap<i64, desktop_auth::UserProfile>, String>),
+    StreamProfilePictureLoaded(u64, String, image::Handle),
+}
+
 impl App {
-    pub(super) fn update_reads(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_reads(&mut self, message: ReadsMessage) -> Task<Message> {
         match message {
-            Message::LoadCoursework(id) if !self.verify_live_course_count && !self.has_pending_request() => {
+            ReadsMessage::LoadCoursework(id) if !self.verify_live_course_count && !self.has_pending_request() => {
                 if let Some(session) = self.session.clone()
                     && self.snapshot.as_ref().is_some_and(|snapshot| {
                         snapshot.courses.iter().any(|course| course.id == id)
@@ -15,36 +35,36 @@ impl App {
                     self.notice = None;
                     let coursework = Task::perform(
                         async move { desktop_auth::load_coursework(&session, id).await },
-                        move |result| Message::CourseworkLoaded(id, result.map(Arc::new)),
+                        move |result| Message::Reads(ReadsMessage::CourseworkLoaded(id, result.map(Arc::new))),
                     );
-                    let access = self.missing_stream_access(id).then_some(Message::LoadStreamAccess(id));
+                    let access = self.missing_stream_access(id).then_some(Message::Reads(ReadsMessage::LoadStreamAccess(id)));
                     return Task::batch([coursework, access.map_or_else(Task::none, |message| self.update(message))]);
                 }
             }
-            Message::LoadStreamAccess(id) if self.can_read_visible_stream_access(id) && !self.loading_stream_access.contains(&id) => {
+            ReadsMessage::LoadStreamAccess(id) if self.can_read_visible_stream_access(id) && !self.stream.loading_stream_access.contains(&id) => {
                 let Some(session) = self.session.clone() else { return Task::none() };
                 self.page_errors.remove(&PageRead::StreamAccess(id));
-                self.loading_stream_access.insert(id);
-                let generation = self.stream_access_generation;
+                self.stream.loading_stream_access.insert(id);
+                let generation = self.stream.stream_access_generation;
                 let access = Task::perform(async move { desktop_auth::load_stream_permission(&session, id).await },
-                    move |result| Message::StreamAccessLoaded(generation, id, result));
+                    move |result| Message::Reads(ReadsMessage::StreamAccessLoaded(generation, id, result)));
                 if self.screen == Screen::Item(id) {
                     self.queued_page_load = true;
                     return Task::batch([access, self.dequeue_page_load().map_or_else(Task::none, |message| self.update(message))]);
                 }
                 return access;
             }
-            Message::StreamAccessLoaded(generation, id, result) if generation == self.stream_access_generation => {
-                self.loading_stream_access.remove(&id);
+            ReadsMessage::StreamAccessLoaded(generation, id, result) if generation == self.stream.stream_access_generation => {
+                self.stream.loading_stream_access.remove(&id);
                 match result {
                     Ok((user, access)) => {
-                        self.stream_viewer_id = Some(user);
-                        self.stream_access.insert(id, access);
+                        self.stream.stream_viewer_id = Some(user);
+                        self.stream.stream_access.insert(id, access);
                     }
                     Err(error) => { self.page_errors.insert(PageRead::StreamAccess(id), error); }
                 }
             }
-            Message::LoadAssignments if self.can_read_pages() && !self.has_pending_request()
+            ReadsMessage::LoadAssignments if self.can_read_pages() && !self.has_pending_request()
                 && self.assignment_batch.is_none() && self.screen.uses_assignment_overview() =>
             {
                 self.page_errors.remove(&PageRead::Assignments);
@@ -57,7 +77,7 @@ impl App {
                     let generation = self.assignment_generation;
                     let updates = desktop_auth::assignment_updates(session, remaining.iter().copied().collect());
                     let (task, handle) = Task::run(updates, move |result| {
-                        Message::AssignmentLoaded(generation, result)
+                        Message::Reads(ReadsMessage::AssignmentLoaded(generation, result))
                     }).abortable();
                     self.assignment_batch = Some(AssignmentBatch {
                         handle,
@@ -68,10 +88,10 @@ impl App {
                     return task;
                 }
             }
-            Message::AssignmentLoaded(generation, result) if generation == self.assignment_generation => {
+            ReadsMessage::AssignmentLoaded(generation, result) if generation == self.assignment_generation => {
                 self.apply_assignment_update(result);
             }
-            Message::CourseworkLoaded(id, result) => {
+            ReadsMessage::CourseworkLoaded(id, result) => {
                 self.loading_coursework = None;
                 if std::env::var_os("CLASSROOM_READ_ONLY_DIAGNOSTICS").is_some() {
                     println!("Classwork read completed; success={}", result.is_ok());
@@ -84,22 +104,22 @@ impl App {
                 match result {
                     Ok(contents) => {
                         let contents = Arc::unwrap_or_clone(contents);
-                        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
-                        self.personal_copy_checks.retain(|(course, _), _| *course != id);
-                        if self.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
-                            self.pending_personal_copy = None;
+                        self.attachments.personal_copy_generation = self.attachments.personal_copy_generation.wrapping_add(1);
+                        self.attachments.personal_copy_checks.retain(|(course, _), _| *course != id);
+                        if self.attachments.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
+                            self.attachments.pending_personal_copy = None;
                         }
-                        self.gradebooks.remove(&id);
+                        self.grading.gradebooks.remove(&id);
                         if let Some(snapshot) = &mut self.snapshot {
                             if self.screen == Screen::Course(id)
-                                && let Some(topic) = self.selected_topic.as_ref()
+                                && let Some(topic) = self.classwork.selected_topic.as_ref()
                                 && contents.topics.as_ref().is_some_and(|topics| !topics.iter().any(|entry| &entry.id == topic))
                                 && !contents.items.iter().any(|item| item.topic_id.as_ref() == Some(topic))
                             {
-                                self.selected_topic = None;
-                                self.classwork_toggles.clear();
+                                self.classwork.selected_topic = None;
+                                self.classwork.classwork_toggles.clear();
                             }
-                            self.submissions_checked.remove(&id);
+                            self.student_work.submissions_checked.remove(&id);
                             if self.assignments_completed.remove(&id) {
                                 self.assignments_loaded = false;
                             }
@@ -114,7 +134,7 @@ impl App {
                     }
                 }
             }
-            Message::LoadDetail(request) if !self.verify_live_course_count && !self.has_pending_request() => {
+            ReadsMessage::LoadDetail(request) if !self.verify_live_course_count && !self.has_pending_request() => {
                 if let Some(session) = self.session.clone() {
                     let requested_ids = match request {
                         DetailRead::TeacherGradebook(course) => self.snapshot.as_ref().and_then(|snapshot| snapshot.coursework_for(course))
@@ -130,7 +150,7 @@ impl App {
                         _ => None,
                     };
                     if matches!(request, DetailRead::PersonalCopy(..)) {
-                        self.personal_copy_loading_generation = Some(self.personal_copy_generation);
+                        self.attachments.personal_copy_loading_generation = Some(self.attachments.personal_copy_generation);
                     }
                     self.loading_detail = Some(request);
                     self.page_errors.remove(&PageRead::Detail(request));
@@ -168,13 +188,13 @@ impl App {
                             DetailRead::TeacherTopics(course) => desktop_auth::load_teacher_topics(&session, course).await
                                 .map(DetailData::TeacherTopics),
                         }
-                    }, move |result| Message::DetailLoaded(request, result));
+                    }, move |result| Message::Reads(ReadsMessage::DetailLoaded(request, result)));
                 }
             }
-            Message::DetailLoaded(request, result) => {
+            ReadsMessage::DetailLoaded(request, result) => {
                 self.loading_detail = None;
                 if matches!(request, DetailRead::PersonalCopy(..))
-                    && self.personal_copy_loading_generation.take() != Some(self.personal_copy_generation)
+                    && self.attachments.personal_copy_loading_generation.take() != Some(self.attachments.personal_copy_generation)
                 {
                     self.queued_page_load = true;
                     return self.dequeue_page_load().map_or_else(Task::none, |read| self.update(read));
@@ -209,59 +229,59 @@ impl App {
                         if let Some(snapshot) = &mut self.snapshot {
                             snapshot.roster.insert(course, members);
                         }
-                        self.student_muting.remove(&course);
+                        self.people.student_muting.remove(&course);
                         self.queued_page_load |= self.screen == Screen::Course(course) && self.tab == Tab::People;
                     }
                     (DetailRead::Submissions(course), Ok(DetailData::Submissions(submissions))) => {
-                        self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
-                        if self.pending_personal_copy.as_ref().is_some_and(|(id, _, _)| *id == course) {
-                            self.pending_personal_copy = None;
+                        self.attachments.personal_copy_generation = self.attachments.personal_copy_generation.wrapping_add(1);
+                        if self.attachments.pending_personal_copy.as_ref().is_some_and(|(id, _, _)| *id == course) {
+                            self.attachments.pending_personal_copy = None;
                         }
-                        self.personal_copy_checks.retain(|(id, _), _| *id != course);
+                        self.attachments.personal_copy_checks.retain(|(id, _), _| *id != course);
                         if let Some(snapshot) = &mut self.snapshot {
                             snapshot.set_submissions(course, submissions);
-                            self.submissions_checked.insert(course);
+                            self.student_work.submissions_checked.insert(course);
                         }
                     }
                     (DetailRead::PersonalCopy(course, item), Ok(DetailData::PersonalCopy(reference, absent))) => {
-                        self.personal_copy_checks.insert((course, item), (reference, absent));
+                        self.attachments.personal_copy_checks.insert((course, item), (reference, absent));
                     }
                     (DetailRead::PrivateFeedback(course, item), Ok(DetailData::PrivateFeedback(comments))) => {
-                        self.private_feedback.insert((course, item), comments);
-                        self.private_unconfirmed.remove(&(course, item));
+                        self.comments.private_feedback.insert((course, item), comments);
+                        self.comments.private_unconfirmed.remove(&(course, item));
                     }
                     (DetailRead::OverallGrade(course), Ok(DetailData::OverallGrade(grade))) => {
-                        self.overall_grades.insert(course, grade);
+                        self.student_work.overall_grades.insert(course, grade);
                     }
                     (DetailRead::TeacherDrafts(course), Ok(DetailData::TeacherDrafts(drafts)))
                         if self.class_roles.get(&course) == Some(&CourseRole::Teacher) =>
                     {
-                        self.teacher_drafts.insert(course, drafts);
+                        self.classwork.teacher_drafts.insert(course, drafts);
                         self.queued_page_load = true;
                     }
                     (DetailRead::TeacherSubmissions(course, item), Ok(DetailData::TeacherSubmissions(students)))
                         if self.can_read_teacher_work(course, item) =>
                     {
-                        let previous = self.teacher_work.take().filter(|work| work.course == course && work.item == item);
-                        let requested = self.gradebook_student.take()
+                        let previous = self.grading.teacher_work.take().filter(|work| work.course == course && work.item == item);
+                        let requested = self.grading.gradebook_student.take()
                             .and_then(|(c, i, student)| (c == course && i == item).then_some(student));
                         let (filter, selected) = previous.as_ref().map_or((StudentWorkFilter::All, requested), |work| (work.filter, work.selected.or(requested)));
                         let mut work = TeacherWork { course, item, students, filter, selected: None,
                             grade: String::new(), confirming_return: false, bulk_selected: BTreeSet::new(), bulk_confirming: false };
                         work.select(selected.filter(|id| work.students.iter().any(|row| row.student_id == *id && filter.includes(row))));
-                        self.teacher_work = Some(work);
+                        self.grading.teacher_work = Some(work);
                     }
                     (DetailRead::TeacherFeedback(key), Ok(DetailData::TeacherFeedback(comments)))
                         if self.selected_teacher_feedback_key() == Some(key) =>
                     {
-                        let thread = self.teacher_feedback.entry(key).or_default();
+                        let thread = self.grading.teacher_feedback.entry(key).or_default();
                         thread.comments = Some(comments);
                         thread.unconfirmed = false;
                     }
                     (DetailRead::TeacherGradebook(course), Ok(DetailData::TeacherGradebook(gradebook)))
                         if self.class_roles.get(&course) == Some(&CourseRole::Teacher) =>
                     {
-                        self.gradebooks.insert(course, gradebook);
+                        self.grading.gradebooks.insert(course, gradebook);
                     }
                     (DetailRead::ClassStreamSettings(course), Ok(DetailData::ClassStreamSettings(settings)))
                         if self.tab == Tab::ClassSettings && self.can_edit_class_stream_settings(course) =>
@@ -271,7 +291,7 @@ impl App {
                     (DetailRead::StudentMuting(course), Ok(DetailData::StudentMuting(states)))
                         if self.class_roles.get(&course) == Some(&CourseRole::Teacher) =>
                     {
-                        self.student_muting.insert(course, states);
+                        self.people.student_muting.insert(course, states);
                     }
                     (DetailRead::TeacherTopics(course), Ok(DetailData::TeacherTopics(topics)))
                         if self.class_roles.get(&course) == Some(&CourseRole::Teacher) =>
@@ -280,10 +300,10 @@ impl App {
                         self.queued_page_load |= self.screen == Screen::Course(course) && self.tab == Tab::Classwork;
                     }
                     (DetailRead::Rubric(course, item), Ok(DetailData::Rubric(rubric))) => {
-                        self.rubrics.insert((course, item), rubric);
+                        self.student_work.rubrics.insert((course, item), rubric);
                     }
                     (DetailRead::Comments(course, item), Ok(DetailData::Comments(comments))) => {
-                        self.comment_unconfirmed.remove(&(course, item));
+                        self.comments.comment_unconfirmed.remove(&(course, item));
                         let item_id = item.to_string();
                         if let Some(item) = self.snapshot.as_mut()
                             .and_then(|snapshot| snapshot.coursework.get_mut(&course))
@@ -295,7 +315,7 @@ impl App {
                     _ => {}
                 }
             }
-            Message::ClassFoldersLoaded(generation, result) if generation == self.class_folders_generation => {
+            ReadsMessage::ClassFoldersLoaded(generation, result) if generation == self.class_folders_generation => {
                 match result {
                     Ok(details) => {
                         if std::env::var_os("CLASSROOM_READ_ONLY_DIAGNOSTICS").is_some() {
@@ -309,25 +329,25 @@ impl App {
                     Err(_) => self.class_folders_failed = true,
                 }
             }
-            Message::RetryClassFolders if self.class_folders_failed => return self.fetch_class_folders(),
-            Message::ClassTeachersLoaded(generation, Ok(teachers)) if generation == self.teachers_generation => {
+            ReadsMessage::RetryClassFolders if self.class_folders_failed => return self.fetch_class_folders(),
+            ReadsMessage::ClassTeachersLoaded(generation, Ok(teachers)) if generation == self.teachers_generation => {
                 self.class_teachers = teachers;
             }
-            Message::AttachmentOpened => {}
-            Message::AttachmentFailed => self.error = Some("The attachment couldn't be opened in your browser.".into()),
-            Message::ArtworkLoaded(generation, url, image) if generation == self.artwork_generation => {
+            ReadsMessage::AttachmentOpened => {}
+            ReadsMessage::AttachmentFailed => self.error = Some("The attachment couldn't be opened in your browser.".into()),
+            ReadsMessage::ArtworkLoaded(generation, url, image) if generation == self.artwork_generation => {
                 self.artwork.insert(url, image);
             }
-            Message::StreamProfilesLoaded(generation, Ok(profiles)) if generation == self.artwork_generation => {
+            ReadsMessage::StreamProfilesLoaded(generation, Ok(profiles)) if generation == self.artwork_generation => {
                 let urls = profiles.values().filter_map(|profile| profile.photo_url.as_ref())
-                    .filter(|url| !self.stream_profile_pictures.contains_key(url.as_str())).cloned().collect();
-                self.stream_profiles.extend(profiles);
+                    .filter(|url| !self.stream.stream_profile_pictures.contains_key(url.as_str())).cloned().collect();
+                self.stream.stream_profiles.extend(profiles);
                 return Task::run(desktop_auth::profile_picture_updates(urls), move |(url, image)| {
-                    Message::StreamProfilePictureLoaded(generation, url, image)
+                    Message::Reads(ReadsMessage::StreamProfilePictureLoaded(generation, url, image))
                 });
             }
-            Message::StreamProfilePictureLoaded(generation, url, image) if generation == self.artwork_generation => {
-                self.stream_profile_pictures.insert(url, image);
+            ReadsMessage::StreamProfilePictureLoaded(generation, url, image) if generation == self.artwork_generation => {
+                self.stream.stream_profile_pictures.insert(url, image);
             }
             _ => {}
         }

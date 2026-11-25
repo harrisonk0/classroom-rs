@@ -4,7 +4,7 @@ use iced::widget::column;
 impl App {
     pub(super) fn apply_teacher_topics(&mut self, course: i64, topics: Vec<desktop_data::Topic>, removed: Option<&str>) {
         if let Some(removed) = removed
-            && let Some(drafts) = self.teacher_drafts.get_mut(&course)
+            && let Some(drafts) = self.classwork.teacher_drafts.get_mut(&course)
         {
             for draft in drafts.iter_mut().filter(|draft| draft.item.topic_id.as_deref() == Some(removed)) {
                 draft.item.topic_id = None;
@@ -17,14 +17,14 @@ impl App {
                 for item in items.iter_mut().filter(|item| item.topic_id.as_deref() == Some(removed)) {
                     item.topic_id = None;
                 }
-                if self.screen == Screen::Course(course) && self.selected_topic.as_deref() == Some(removed) {
-                    self.selected_topic = None;
+                if self.screen == Screen::Course(course) && self.classwork.selected_topic.as_deref() == Some(removed) {
+                    self.classwork.selected_topic = None;
                 }
             }
             let published_ids: BTreeSet<_> = items.iter().filter_map(|item| item.topic_id.as_deref()).collect();
             snapshot.topics.insert(course, topics.iter().filter(|topic| published_ids.contains(topic.id.as_str())).cloned().collect());
         }
-        self.teacher_topics.insert(course, topics);
+        self.classwork.teacher_topics.insert(course, topics);
     }
 
     pub(super) fn can_manage_topics(&self, course: i64) -> bool {
@@ -34,7 +34,7 @@ impl App {
     pub(super) fn apply_item_topic(&mut self, target: &desktop_auth::TopicItemTarget, topic: Option<String>) {
         let matching = |item: &Coursework| item.kind == target.kind && item.id.parse::<i64>().ok() == Some(target.item);
         if target.draft {
-            if let Some(row) = self.teacher_drafts.get_mut(&target.course)
+            if let Some(row) = self.classwork.teacher_drafts.get_mut(&target.course)
                 .and_then(|drafts| drafts.iter_mut().find(|row| matching(&row.item)))
             {
                 row.item.topic_id = topic;
@@ -44,7 +44,7 @@ impl App {
         {
             item.topic_id = topic;
             item.classwork_sort_key = None;
-            if let Some(topics) = self.teacher_topics.get(&target.course).cloned() {
+            if let Some(topics) = self.classwork.teacher_topics.get(&target.course).cloned() {
                 self.apply_teacher_topics(target.course, topics, None);
             }
         }
@@ -52,34 +52,34 @@ impl App {
 
     fn item_topic_button<'a>(&'a self, item: &'a Coursework, draft: bool) -> Option<Element<'a, Message>> {
         if item.kind == CourseworkKind::Announcement || item.id.parse::<i64>().is_err()
-            || !self.teacher_topics.contains_key(&item.course_id)
+            || !self.classwork.teacher_topics.contains_key(&item.course_id)
             || !(self.can_manage_topics(item.course_id)
                 || self.screenshot_directory.is_some() && self.class_roles.get(&item.course_id) == Some(&CourseRole::Teacher))
         {
             return None;
         }
         Some(button("Change topic…").style(outline_style).padding([7, 10])
-            .on_press_maybe((!self.has_pending_request() && self.item_topic_editor.is_none())
-                .then(|| Message::OpenItemTopic(item.course_id, item.id.clone(), draft))).into())
+            .on_press_maybe((!self.has_pending_request() && self.classwork.item_topic_editor.is_none())
+                .then(|| Message::Teaching(TeachingMessage::OpenItemTopic(item.course_id, item.id.clone(), draft)))).into())
     }
 
     pub(super) fn item_topic_editor_panel<'a>(&'a self, editor: &'a ItemTopicEditor) -> Element<'a, Message> {
         let choices: Vec<_> = std::iter::once(TopicChoice { id: None, label: "No topic".into() })
-            .chain(self.teacher_topics.get(&editor.target.course).into_iter().flatten()
+            .chain(self.classwork.teacher_topics.get(&editor.target.course).into_iter().flatten()
                 .map(|topic| TopicChoice { id: Some(topic.id.clone()), label: topic.title.clone() })).collect();
         let selected = choices.iter().find(|choice| choice.id == editor.selected).cloned();
         let ready = !self.has_pending_request() && selected.is_some() && editor.selected != editor.target.original;
         container(column![
             text("Change topic").size(17).font(medium()),
             text(&editor.title).size(14),
-            pick_list(choices, selected, Message::SelectItemTopic).placeholder("Choose a topic").padding(8),
+            pick_list(choices, selected, |value| Message::Teaching(TeachingMessage::SelectItemTopic(value))).placeholder("Choose a topic").padding(8),
             row![
-                button(if self.saving_topic { "Saving…" } else { "Save" }).style(primary_style).padding([7, 10])
-                    .on_press_maybe(ready.then_some(Message::SaveItemTopic)),
+                button(if self.classwork.saving_topic { "Saving…" } else { "Save" }).style(primary_style).padding([7, 10])
+                    .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::SaveItemTopic))),
                 button("Cancel").style(quiet_style).padding([7, 10])
-                    .on_press_maybe((!self.saving_topic).then_some(Message::CloseItemTopic)),
+                    .on_press_maybe((!self.classwork.saving_topic).then_some(Message::Teaching(TeachingMessage::CloseItemTopic))),
             ].spacing(8),
-        ].spacing(8)).padding(12).width(Fill).style(|_| outline_surface(9.0)).into()
+        ].spacing(8)).padding(12).width(Fill).style(|theme| outline_surface(theme, 9.0)).into()
     }
 
     pub(super) fn teacher_topic_panel(&self, course: i64) -> Option<Element<'_, Message>> {
@@ -89,7 +89,7 @@ impl App {
         {
             return None;
         }
-        let topics = self.teacher_topics.get(&course);
+        let topics = self.classwork.teacher_topics.get(&course);
         if let Some(status) = self.page_read_status(
             PageRead::Detail(DetailRead::TeacherTopics(course)), topics.is_some(), "Loading topics…",
         ) {
@@ -99,63 +99,63 @@ impl App {
         let ready = !self.has_pending_request();
         let actions = row![
             button("Create topic").style(outline_style).padding([7, 10])
-                .on_press_maybe((ready && self.topic_editor.is_none()).then(|| Message::OpenTopicEditor(course, TeacherTopicAction::Create(String::new())))),
-            button(if self.topic_manager { "Hide topic manager" } else { "Manage topics" }).style(quiet_style).padding([7, 10])
-                .on_press_maybe(ready.then_some(Message::ToggleTopicManager)),
+                .on_press_maybe((ready && self.classwork.topic_editor.is_none()).then(|| Message::Teaching(TeachingMessage::OpenTopicEditor(course, TeacherTopicAction::Create(String::new()))))),
+            button(if self.classwork.topic_manager { "Hide topic manager" } else { "Manage topics" }).style(quiet_style).padding([7, 10])
+                .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::ToggleTopicManager))),
         ].spacing(8).wrap().vertical_spacing(8);
         let mut panel = column![actions].spacing(8);
-        if let Some((id, action)) = self.topic_editor.as_ref().filter(|(id, _)| *id == course) {
+        if let Some((id, action)) = self.classwork.topic_editor.as_ref().filter(|(id, _)| *id == course) {
             let mut editor = column![].spacing(8);
             let label = match action {
                 TeacherTopicAction::Create(name) | TeacherTopicAction::Rename { name, .. } => {
                     editor = editor.push(text_input("Topic name", name).padding(8).width(Fill)
-                        .on_input_maybe((!self.saving_topic).then_some(Message::EditTopicName)));
+                        .on_input_maybe((!self.classwork.saving_topic).then_some(|value| Message::Teaching(TeachingMessage::EditTopicName(value)))));
                     if matches!(action, TeacherTopicAction::Create(_)) { "Add topic" } else { "Rename topic" }
                 }
                 TeacherTopicAction::Delete(topic) => {
                     editor = editor.push(text(format!("Delete “{}”?", topic.title)).size(15).font(medium()))
-                        .push(text("Posts in this topic move to No topic.").size(13).color(MUTED));
+                        .push(text("Posts in this topic move to No topic.").size(13).style(move |theme| themed_text(theme, MUTED)));
                     "Delete topic"
                 }
             };
             editor = editor.push(row![
                 button(label).style(primary_style).padding([7, 10])
-                    .on_press_maybe((ready && *id == course && topic_action_valid(action)).then_some(Message::SaveTopicEditor)),
+                    .on_press_maybe((ready && *id == course && topic_action_valid(action)).then_some(Message::Teaching(TeachingMessage::SaveTopicEditor))),
                 button("Cancel").style(quiet_style).padding([7, 10])
-                    .on_press_maybe((!self.saving_topic).then_some(Message::CloseTopicEditor)),
+                    .on_press_maybe((!self.classwork.saving_topic).then_some(Message::Teaching(TeachingMessage::CloseTopicEditor))),
             ].spacing(8));
-            panel = panel.push(container(editor).padding(12).width(Fill).style(|_| outline_surface(9.0)));
+            panel = panel.push(container(editor).padding(12).width(Fill).style(|theme| outline_surface(theme, 9.0)));
         }
-        if self.topic_manager {
+        if self.classwork.topic_manager {
             let mut list = column![text("Topics").size(16).font(medium())].spacing(6);
             if topics.is_empty() {
-                list = list.push(text("No topics yet.").size(14).color(MUTED));
+                list = list.push(text("No topics yet.").size(14).style(move |theme| themed_text(theme, MUTED)));
             }
             for (index, topic) in topics.iter().enumerate() {
-                let available = ready && self.topic_editor.is_none();
+                let available = ready && self.classwork.topic_editor.is_none();
                 list = list.push(row![
                     text(&topic.title).size(14).width(Fill).wrapping(text::Wrapping::WordOrGlyph),
                     button("Move up").style(quiet_style).padding([5, 7])
-                        .on_press_maybe((available && index > 0).then(|| Message::MoveTeacherTopic(course,
-                            topic.id.clone(), desktop_auth::TopicOrderDirection::Up))),
+                        .on_press_maybe((available && index > 0).then(|| Message::Teaching(TeachingMessage::MoveTeacherTopic(course,
+                            topic.id.clone(), desktop_auth::TopicOrderDirection::Up)))),
                     button("Move down").style(quiet_style).padding([5, 7])
-                        .on_press_maybe((available && index + 1 < topics.len()).then(|| Message::MoveTeacherTopic(course,
-                            topic.id.clone(), desktop_auth::TopicOrderDirection::Down))),
+                        .on_press_maybe((available && index + 1 < topics.len()).then(|| Message::Teaching(TeachingMessage::MoveTeacherTopic(course,
+                            topic.id.clone(), desktop_auth::TopicOrderDirection::Down)))),
                     button("Rename…").style(quiet_style).padding([5, 7])
-                        .on_press_maybe(available.then(|| Message::OpenTopicEditor(course,
-                            TeacherTopicAction::Rename { topic: topic.clone(), name: topic.title.clone() }))),
+                        .on_press_maybe(available.then(|| Message::Teaching(TeachingMessage::OpenTopicEditor(course,
+                            TeacherTopicAction::Rename { topic: topic.clone(), name: topic.title.clone() })))),
                     button("Delete…").style(quiet_style).padding([5, 7])
-                        .on_press_maybe(available.then(|| Message::OpenTopicEditor(course, TeacherTopicAction::Delete(topic.clone())))),
+                        .on_press_maybe(available.then(|| Message::Teaching(TeachingMessage::OpenTopicEditor(course, TeacherTopicAction::Delete(topic.clone()))))),
                 ].spacing(5).align_y(Alignment::Center));
             }
-            panel = panel.push(container(list).padding(12).width(Fill).style(|_| outline_surface(9.0)));
+            panel = panel.push(container(list).padding(12).width(Fill).style(|theme| outline_surface(theme, 9.0)));
         }
         Some(panel.into())
     }
 
     pub(super) fn classwork(&self, course_id: i64) -> Element<'_, Message> {
         let Some(snapshot) = &self.snapshot else { return space().into() };
-        let topics: Vec<_> = if let Some(topics) = self.teacher_topics.get(&course_id)
+        let topics: Vec<_> = if let Some(topics) = self.classwork.teacher_topics.get(&course_id)
             && self.class_roles.get(&course_id) == Some(&CourseRole::Teacher)
             && (self.can_read_pages() || self.screenshot_directory.is_some())
         {
@@ -184,9 +184,9 @@ impl App {
                     .chain(topics.iter().map(|(id, title)| TopicChoice {
                         id: Some(id.clone()), label: (*title).to_owned(),
                     })).collect();
-                let selected = choices.iter().find(|choice| choice.id == self.selected_topic).cloned();
+                let selected = choices.iter().find(|choice| choice.id == self.classwork.selected_topic).cloned();
                 column![
-                    pick_list(choices, selected, |choice| Message::SelectTopic(choice.id))
+                    pick_list(choices, selected, |choice| Message::Navigation(NavigationMessage::SelectTopic(choice.id)))
                         .placeholder("All topics").padding(8).width(Length::Shrink),
                     self.classwork_items(course_id),
                 ].spacing(12).into()
@@ -200,7 +200,7 @@ impl App {
         let loaded = snapshot.coursework_for(course_id).is_some();
         let status = self.page_read_status(PageRead::Coursework(course_id), loaded, "Loading classwork…");
         let pending = status.is_some();
-        let sections = snapshot.classwork_sections(course_id, self.selected_topic.as_deref());
+        let sections = snapshot.classwork_sections(course_id, self.classwork.selected_topic.as_deref());
         let mut work = column![].spacing(12).width(Fill);
         if let Some(status) = status {
             work = work.push(status);
@@ -212,7 +212,7 @@ impl App {
             && snapshot.coursework_for(course_id).is_some_and(|items| items.iter().any(has_submission))
             && let Some(status) = self.page_read_status(
                 PageRead::Detail(DetailRead::Submissions(course_id)),
-                self.submissions_checked.contains(&course_id), "Loading your work…",
+                self.student_work.submissions_checked.contains(&course_id), "Loading your work…",
             )
         {
             work = work.push(status);
@@ -224,22 +224,22 @@ impl App {
                 empty_panel(Icon::Book, "Classwork unavailable", "This offline copy has no classwork.")
             });
         }
-        if self.selected_topic.is_none() && !sections.is_empty() {
-            let all_closed = sections.iter().all(|section| self.collapsed_classwork_groups.contains(&section.id));
+        if self.classwork.selected_topic.is_none() && !sections.is_empty() {
+            let all_closed = sections.iter().all(|section| self.classwork.collapsed_classwork_groups.contains(&section.id));
             work = work.push(button(if all_closed { "Expand all" } else { "Collapse all" })
-                .style(quiet_style).padding([7, 10]).on_press(Message::SetClassworkGroups(course_id, !all_closed)));
+                .style(quiet_style).padding([7, 10]).on_press(Message::Navigation(NavigationMessage::SetClassworkGroups(course_id, !all_closed))));
         }
         for section in sections {
-            let closed = self.collapsed_classwork_groups.contains(&section.id);
+            let closed = self.classwork.collapsed_classwork_groups.contains(&section.id);
             let reorder = self.can_manage_topics(course_id) && section.confirmed_order
                 && matches!(section.id, ClassworkGroupId::Topic(_));
             work = work.push(button(row![
-                text(section.title).size(19).font(medium()).color(FG).width(Fill)
+                text(section.title).size(19).font(medium()).style(move |theme| themed_text(theme, FG)).width(Fill)
                     .wrapping(text::Wrapping::WordOrGlyph),
-                text(if closed { "⌄" } else { "⌃" }).size(17).color(MUTED),
+                text(if closed { "⌄" } else { "⌃" }).size(17).style(move |theme| themed_text(theme, MUTED)),
             ].spacing(8).align_y(Alignment::Center))
                 .width(Fill).style(quiet_style).padding([8, 9])
-                .on_press(Message::ToggleClassworkGroup(course_id, section.id)));
+                .on_press(Message::Navigation(NavigationMessage::ToggleClassworkGroup(course_id, section.id))));
             if !closed {
                 let count = section.items.len();
                 work = work.extend(section.items.into_iter().enumerate().map(|(index, item)| {
@@ -259,11 +259,11 @@ impl App {
         }
         if let Some(status) = self.page_read_status(
             PageRead::Detail(DetailRead::TeacherDrafts(course)),
-            self.teacher_drafts.contains_key(&course), "Loading drafts and scheduled posts…",
+            self.classwork.teacher_drafts.contains_key(&course), "Loading drafts and scheduled posts…",
         ) {
             return Some(status);
         }
-        let mut drafts: Vec<_> = self.teacher_drafts.get(&course)?.iter()
+        let mut drafts: Vec<_> = self.classwork.teacher_drafts.get(&course)?.iter()
             .filter(|draft| (draft.item.kind == CourseworkKind::Announcement) == announcements).collect();
         if drafts.is_empty() {
             return None;
@@ -273,7 +273,7 @@ impl App {
                 (0, time.unwrap_or(i64::MAX)),
             DraftPublication::Draft => (1, 0),
         });
-        let mut panel = column![text("Drafts and scheduled posts").size(18).font(medium()).color(FG)].spacing(8);
+        let mut panel = column![text("Drafts and scheduled posts").size(18).font(medium()).style(move |theme| themed_text(theme, FG))].spacing(8);
         for draft in drafts {
             let item = &draft.item;
             let (status, time) = match draft.publication {
@@ -284,22 +284,22 @@ impl App {
             };
             let display = time.and_then(DateTime::from_timestamp_millis)
                 .map_or_else(|| status.to_owned(), |date| format!("{status} · {}", date.with_timezone(&Local).format("%-d %b %Y, %H:%M")));
-            let open = self.open_teacher_draft.as_ref().is_some_and(|(id, draft)| *id == course && draft == &item.id);
+            let open = self.classwork.open_teacher_draft.as_ref().is_some_and(|(id, draft)| *id == course && draft == &item.id);
             let heading = row![
                 icon(coursework_icon(item.kind), BLUE, 18),
                 text(&item.title).size(15).font(medium()).width(Fill),
-                text(display).size(13).color(MUTED),
-                text(if open { "⌃" } else { "⌄" }).size(16).color(MUTED),
+                text(display).size(13).style(move |theme| themed_text(theme, MUTED)),
+                text(if open { "⌃" } else { "⌄" }).size(16).style(move |theme| themed_text(theme, MUTED)),
             ].spacing(8).align_y(Alignment::Center);
             let main = button(heading).width(Fill).style(quiet_style).padding([8, 10])
-                .on_press(Message::ToggleTeacherDraft(course, item.id.clone()));
+                .on_press(Message::Teaching(TeachingMessage::ToggleTeacherDraft(course, item.id.clone())));
             let mut line = row![main].spacing(6).align_y(Alignment::Center);
             if (self.can_edit_assignment_drafts(course) || self.screenshot_directory.is_some() && self.tab == Tab::Classwork)
                 && item.kind == CourseworkKind::Assignment && draft.publication == DraftPublication::Draft
             {
                 line = line.push(button("Edit").padding([7, 10]).style(outline_style)
-                    .on_press_maybe((!self.has_pending_request() && self.assignment_editor.is_none() && self.assignment_publication.is_none())
-                        .then(|| Message::OpenAssignmentEditor(course, Some(item.id.clone())))));
+                    .on_press_maybe((!self.has_pending_request() && self.classwork.assignment_editor.is_none() && self.classwork.assignment_publication.is_none())
+                        .then(|| Message::Teaching(TeachingMessage::OpenAssignmentEditor(course, Some(item.id.clone()))))));
             }
             panel = panel.push(line);
             if open && !item.description.is_empty() {
@@ -314,19 +314,19 @@ impl App {
             if open && item.kind == CourseworkKind::Assignment && self.can_edit_assignment_drafts(course)
                 && matches!(draft.publication, DraftPublication::Draft | DraftPublication::Scheduled(_))
             {
-                let ready = !self.has_pending_request() && self.assignment_editor.is_none() && self.assignment_publication.is_none();
+                let ready = !self.has_pending_request() && self.classwork.assignment_editor.is_none() && self.classwork.assignment_publication.is_none();
                 let mut actions = row![].spacing(6);
                 if draft.publication == DraftPublication::Draft {
                     actions = actions.push(button("Publish now…").style(outline_style).padding([7, 10])
-                        .on_press_maybe(ready.then(|| Message::OpenAssignmentPublication(course, item.id.clone(), false))));
+                        .on_press_maybe(ready.then(|| Message::Teaching(TeachingMessage::OpenAssignmentPublication(course, item.id.clone(), false)))));
                 }
                 let label = if draft.publication == DraftPublication::Draft { "Schedule…" } else { "Reschedule…" };
                 actions = actions.push(button(label).style(outline_style).padding([7, 10])
-                    .on_press_maybe(ready.then(|| Message::OpenAssignmentPublication(course, item.id.clone(), true))));
+                    .on_press_maybe(ready.then(|| Message::Teaching(TeachingMessage::OpenAssignmentPublication(course, item.id.clone(), true)))));
                 panel = panel.push(actions);
             }
         }
-        Some(container(panel).padding(12).width(Fill).style(|_| outline_surface(9.0)).into())
+        Some(container(panel).padding(12).width(Fill).style(|theme| outline_surface(theme, 9.0)).into())
     }
 
     pub(super) fn can_edit_assignment_drafts(&self, course: i64) -> bool {
@@ -345,49 +345,49 @@ impl App {
             && desktop_auth::assignment_draft_text_valid(&editor.title, &instructions)
             && editor.original.as_ref().is_none_or(|draft|
                 draft.item.title != editor.title.trim() || draft.item.description != instructions || fields_changed);
-        let editing = !self.saving_assignment_draft;
+        let editing = !self.classwork.saving_assignment_draft;
         let instructions_field = if editor.instructions_editable() {
             let field = text_editor(&editor.instructions).placeholder("Instructions (optional)").height(100).padding(9);
-            if self.saving_assignment_draft { field } else { field.on_action(Message::EditAssignmentInstructions) }
+            if self.classwork.saving_assignment_draft { field } else { field.on_action(|value| Message::Teaching(TeachingMessage::EditAssignmentInstructions(value))) }
         } else {
             text_editor(&editor.instructions).height(100).padding(9)
         };
         let mut form = column![
             text(if editor.original.is_some() { "Edit assignment draft" } else { "New assignment draft" }).size(19).font(medium()),
             text_input("Title", &editor.title).padding(9)
-                .on_input_maybe((!self.saving_assignment_draft).then_some(Message::EditAssignmentTitle)),
+                .on_input_maybe((!self.classwork.saving_assignment_draft).then_some(|value| Message::Teaching(TeachingMessage::EditAssignmentTitle(value)))),
             instructions_field,
         ].spacing(9).width(Fill);
         if !editor.instructions_editable() {
-            form = form.push(text("These instructions use formatting and are read-only here.").size(13).color(MUTED));
+            form = form.push(text("These instructions use formatting and are read-only here.").size(13).style(move |theme| themed_text(theme, MUTED)));
         }
         form = form.push(row![
             column![
-                text("Due date").size(13).color(MUTED),
+                text("Due date").size(13).style(move |theme| themed_text(theme, MUTED)),
                 text_input("YYYY-MM-DD", &editor.settings.due_date).padding(8)
-                    .on_input_maybe(editing.then_some(Message::EditAssignmentDueDate)),
+                    .on_input_maybe(editing.then_some(|value| Message::Teaching(TeachingMessage::EditAssignmentDueDate(value)))),
             ].spacing(4).width(Fill),
             column![
-                text("Due time").size(13).color(MUTED),
+                text("Due time").size(13).style(move |theme| themed_text(theme, MUTED)),
                 text_input("HH:MM", &editor.settings.due_time).padding(8)
-                    .on_input_maybe(editing.then_some(Message::EditAssignmentDueTime)),
+                    .on_input_maybe(editing.then_some(|value| Message::Teaching(TeachingMessage::EditAssignmentDueTime(value)))),
             ].spacing(4).width(Fill),
             column![
-                text("Points").size(13).color(MUTED),
+                text("Points").size(13).style(move |theme| themed_text(theme, MUTED)),
                 text_input("Ungraded", &editor.settings.points).padding(8)
-                    .on_input_maybe(editing.then_some(Message::EditAssignmentPoints)),
+                    .on_input_maybe(editing.then_some(|value| Message::Teaching(TeachingMessage::EditAssignmentPoints(value)))),
             ].spacing(4).width(Fill),
         ].spacing(9));
         if let Err(error) = fields {
-            form = form.push(text(error).size(13).color(color!(0x9b2722)));
+            form = form.push(text(error).size(13).style(move |theme| themed_text(theme, color!(0x9b2722))));
         }
         form = form.push(row![
-            button(if self.saving_assignment_draft { "Saving…" } else { "Save draft" }).padding([8, 12]).style(primary_style)
-                .on_press_maybe(ready.then_some(Message::SaveAssignmentDraft)),
+            button(if self.classwork.saving_assignment_draft { "Saving…" } else { "Save draft" }).padding([8, 12]).style(primary_style)
+                .on_press_maybe(ready.then_some(Message::Teaching(TeachingMessage::SaveAssignmentDraft))),
             button("Cancel").padding([8, 12]).style(quiet_style)
-                .on_press_maybe((!self.saving_assignment_draft).then_some(Message::CloseAssignmentEditor)),
+                .on_press_maybe((!self.classwork.saving_assignment_draft).then_some(Message::Teaching(TeachingMessage::CloseAssignmentEditor))),
         ].spacing(8));
-        container(form).padding(14).width(Fill).style(|_| outline_surface(9.0)).into()
+        container(form).padding(14).width(Fill).style(|theme| outline_surface(theme, 9.0)).into()
     }
 
     pub(super) fn assignment_publication_panel<'a>(&'a self, prompt: &'a AssignmentPublicationPrompt) -> Element<'a, Message> {
@@ -395,64 +395,64 @@ impl App {
         let scheduled = prompt.schedule.is_some();
         let mut panel = column![
             text(if scheduled { "Schedule assignment" } else { "Publish assignment" }).size(19).font(medium()),
-            text(&prompt.draft.item.title).size(15).color(FG),
+            text(&prompt.draft.item.title).size(15).style(move |theme| themed_text(theme, FG)),
         ].spacing(8).width(Fill);
         if let Some(value) = &prompt.schedule {
-            panel = panel.push(text("Enter the date and time on this Mac in YYYY-MM-DD HH:MM format.").size(13).color(MUTED))
+            panel = panel.push(text("Enter the date and time on this Mac in YYYY-MM-DD HH:MM format.").size(13).style(move |theme| themed_text(theme, MUTED)))
                 .push(text_input("YYYY-MM-DD HH:MM", value).padding(8).width(245)
-                    .on_input_maybe((!self.saving_assignment_draft).then_some(Message::EditAssignmentSchedule)));
+                    .on_input_maybe((!self.classwork.saving_assignment_draft).then_some(|value| Message::Teaching(TeachingMessage::EditAssignmentSchedule(value)))));
             if let Some(desktop_auth::AssignmentPublication::Schedule(time)) = action
                 && let Some(time) = DateTime::from_timestamp_millis(time)
             {
                 panel = panel.push(text(format!("Posts {}", time.with_timezone(&Local).format("%-d %b %Y at %H:%M %Z")))
-                    .size(14).color(FG));
+                    .size(14).style(move |theme| themed_text(theme, FG)));
             } else if !value.trim().is_empty() {
-                panel = panel.push(text("Choose a future local time that differs from the current schedule.").size(13).color(MUTED));
+                panel = panel.push(text("Choose a future local time that differs from the current schedule.").size(13).style(move |theme| themed_text(theme, MUTED)));
             }
         } else {
-            panel = panel.push(text("Students will be able to see this assignment immediately.").size(14).color(MUTED));
+            panel = panel.push(text("Students will be able to see this assignment immediately.").size(14).style(move |theme| themed_text(theme, MUTED)));
         }
-        let label = if self.saving_assignment_draft { "Saving…" } else if scheduled { "Schedule" } else { "Publish now" };
+        let label = if self.classwork.saving_assignment_draft { "Saving…" } else if scheduled { "Schedule" } else { "Publish now" };
         panel = panel.push(row![
             button(label).padding([8, 12]).style(primary_style)
-                .on_press_maybe((action.is_some() && !self.has_pending_request()).then_some(Message::ConfirmAssignmentPublication)),
+                .on_press_maybe((action.is_some() && !self.has_pending_request()).then_some(Message::Teaching(TeachingMessage::ConfirmAssignmentPublication))),
             button("Cancel").padding([8, 12]).style(quiet_style)
-                .on_press_maybe((!self.saving_assignment_draft).then_some(Message::CloseAssignmentPublication)),
+                .on_press_maybe((!self.classwork.saving_assignment_draft).then_some(Message::Teaching(TeachingMessage::CloseAssignmentPublication))),
         ].spacing(8));
-        container(panel).padding(14).width(Fill).style(|_| outline_surface(9.0)).into()
+        container(panel).padding(14).width(Fill).style(|theme| outline_surface(theme, 9.0)).into()
     }
 
     pub(super) fn classwork_item_expanded(&self, item: &str) -> bool {
-        self.selected_topic.is_some() ^ self.classwork_toggles.contains(item)
+        self.classwork.selected_topic.is_some() ^ self.classwork.classwork_toggles.contains(item)
     }
 
     fn classwork_item<'a>(&'a self, item: &'a Coursework, move_up: bool, move_down: bool) -> Element<'a, Message> {
         let expanded = self.classwork_item_expanded(&item.id);
         let deadline: Element<'_, Message> = item.due_label.as_ref()
-            .map_or_else(|| space().width(0).into(), |due| text(due).size(13).color(MUTED).into());
+            .map_or_else(|| space().width(0).into(), |due| text(due).size(13).style(move |theme| themed_text(theme, MUTED)).into());
         let header = button(row![
             container(icon(coursework_icon(item.kind), ACTIVE_FG, 19)).center_x(36).center_y(36)
-                .style(|_| surface(ACTIVE_BG, 18.0)),
+                .style(|theme| surface(appearance_color(theme, ACTIVE_BG), 18.0)),
             text(&item.title).font(medium()).size(15).width(Fill).wrapping(text::Wrapping::WordOrGlyph),
             deadline,
-            text(if expanded { "⌃" } else { "⌄" }).size(17).color(MUTED),
+            text(if expanded { "⌃" } else { "⌄" }).size(17).style(move |theme| themed_text(theme, MUTED)),
         ].spacing(10).align_y(Alignment::Center)).width(Fill).padding([9, 12])
-            .style(quiet_style).on_press(Message::ToggleClassworkItem(item.course_id, item.id.clone()));
+            .style(quiet_style).on_press(Message::Navigation(NavigationMessage::ToggleClassworkItem(item.course_id, item.id.clone())));
         let mut card = column![header];
         if expanded {
             let mut summary = column![].spacing(9);
             if !item.description.trim().is_empty() {
-                summary = summary.push(text(truncate(&item.description, 460)).size(14).color(FG)
+                summary = summary.push(text(truncate(&item.description, 460)).size(14).style(move |theme| themed_text(theme, FG))
                     .width(Fill).wrapping(text::Wrapping::WordOrGlyph));
             }
             if let Some(submission) = &item.submission {
                 let label = grade_label(submission).unwrap_or_else(|| submission.status.label().into());
-                summary = summary.push(text(label).size(13).color(ACTIVE_FG));
+                summary = summary.push(text(label).size(13).style(move |theme| themed_text(theme, ACTIVE_FG)));
             }
             if !item.attachments.is_empty() {
                 let count = item.attachments.len();
                 let label = if count == 1 { "1 attachment".to_owned() } else { format!("{count} attachments") };
-                summary = summary.push(text(label).size(13).color(MUTED));
+                summary = summary.push(text(label).size(13).style(move |theme| themed_text(theme, MUTED)));
             }
             let action = match item.kind {
                 CourseworkKind::Assignment => "View instructions",
@@ -461,15 +461,15 @@ impl App {
                 CourseworkKind::Announcement => "View post",
             };
             summary = summary.push(button(action).style(outline_style).padding([7, 10])
-                .on_press(Message::OpenItem(item.course_id, item.id.clone())));
+                .on_press(Message::Navigation(NavigationMessage::OpenItem(item.course_id, item.id.clone()))));
             if let Some(control) = self.item_topic_button(item, false) {
                 summary = summary.push(control);
             }
             if move_up || move_down {
-                let ready = !self.has_pending_request() && self.item_topic_editor.is_none();
+                let ready = !self.has_pending_request() && self.classwork.item_topic_editor.is_none();
                 let move_button = |label, allowed, direction| button(label).style(quiet_style).padding([7, 10])
                     .on_press_maybe((ready && allowed)
-                        .then(|| Message::ReorderClasswork(item.course_id, item.id.clone(), direction)));
+                        .then(|| Message::Teaching(TeachingMessage::ReorderClasswork(item.course_id, item.id.clone(), direction))));
                 use desktop_auth::ClassworkOrderDirection::{Up, Down};
                 summary = summary.push(row![
                     move_button("Move up", move_up, Up), move_button("Move down", move_down, Down),
@@ -478,15 +478,15 @@ impl App {
             card = card.push(rule::horizontal(1).style(divider_style))
                 .push(container(summary).padding([10, 13]));
         }
-        container(card).style(|_| outline_surface(9.0)).width(Fill).into()
+        container(card).style(|theme| outline_surface(theme, 9.0)).width(Fill).into()
     }
 
     fn topic_button<'a>(&self, title: &'a str, topic: Option<&str>, sidebar: bool) -> Element<'a, Message> {
-        let active = self.selected_topic.as_deref() == topic;
+        let active = self.classwork.selected_topic.as_deref() == topic;
         button(text(title).size(14).wrapping(text::Wrapping::WordOrGlyph)).padding([8, 12])
             .width(if sidebar { Fill } else { Length::Shrink })
             .style(move |theme, status| nav_style(theme, active, status))
-            .on_press(Message::SelectTopic(topic.map(str::to_owned)))
+            .on_press(Message::Navigation(NavigationMessage::SelectTopic(topic.map(str::to_owned))))
             .into()
     }
 }
@@ -499,4 +499,21 @@ pub(super) fn topic_action_valid(action: &desktop_auth::TeacherTopicAction) -> b
             normalized_topic_name(name).is_some_and(|name| name != topic.title),
         TeacherTopicAction::Delete(topic) => !topic.id.is_empty(),
     }
+}
+
+#[derive(Default)]
+pub(super) struct ClassworkState {
+    pub(super) selected_topic: Option<String>,
+    pub(super) classwork_toggles: BTreeSet<String>,
+    pub(super) collapsed_classwork_groups: BTreeSet<ClassworkGroupId>,
+    pub(super) teacher_drafts: BTreeMap<i64, Vec<desktop_auth::TeacherDraft>>,
+    pub(super) open_teacher_draft: Option<(i64, String)>,
+    pub(super) assignment_editor: Option<AssignmentEditor>,
+    pub(super) assignment_publication: Option<AssignmentPublicationPrompt>,
+    pub(super) teacher_topics: BTreeMap<i64, Vec<desktop_data::Topic>>,
+    pub(super) topic_manager: bool,
+    pub(super) topic_editor: Option<(i64, desktop_auth::TeacherTopicAction)>,
+    pub(super) item_topic_editor: Option<ItemTopicEditor>,
+    pub(super) saving_topic: bool,
+    pub(super) saving_assignment_draft: bool,
 }

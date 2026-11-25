@@ -6,13 +6,13 @@ pub(super) fn empty_panel(
 ) -> Element<'static, Message> {
     let panel = column![
         container(icon(glyph, ACTIVE_FG, 25))
-            .center_x(52).center_y(52).style(|_| surface(ACTIVE_BG, 26.0)),
-        text(title).color(FG).font(medium()).size(17),
-        text(body).color(MUTED).size(14),
+            .center_x(52).center_y(52).style(|theme| surface(appearance_color(theme, ACTIVE_BG), 26.0)),
+        text(title).style(move |theme| themed_text(theme, FG)).font(medium()).size(17),
+        text(body).style(move |theme| themed_text(theme, MUTED)).size(14),
     ]
     .spacing(10).align_x(Alignment::Center);
     container(panel).width(Fill).center_x(Fill).padding([32, 15])
-        .style(|_| outline_surface(10.0)).into()
+        .style(|theme| outline_surface(theme, 10.0)).into()
 }
 
 pub(super) fn medium() -> Font {
@@ -93,14 +93,14 @@ pub(super) fn avatar(label: String, background: Color, diameter: f32, font_size:
     container(text(label).color(WHITE).font(medium()).size(font_size))
         .center_x(diameter)
         .center_y(diameter)
-        .style(move |_| surface(background, diameter / 2.0))
+        .style(move |theme| surface(appearance_color(theme, background), diameter / 2.0))
         .into()
 }
 
 pub(super) fn pill<'a>(label: impl Into<String>, background: Color, foreground: Color) -> Element<'a, Message> {
-    container(text(label.into()).size(13).color(foreground))
+    container(text(label.into()).size(13).style(move |theme| themed_text(theme, foreground)))
         .padding([5, 10])
-        .style(move |_| surface(background, 13.0))
+        .style(move |theme| surface(appearance_color(theme, background), 13.0))
         .into()
 }
 
@@ -112,29 +112,28 @@ pub(super) fn surface(background: Color, radius: impl Into<iced::border::Radius>
     container::Style {
         background: Some(Background::Color(background)),
         border: border(Color::TRANSPARENT, 0.0, radius),
-        text_color: Some(FG),
         ..Default::default()
     }
 }
 
-pub(super) fn outline_surface(radius: f32) -> container::Style {
+pub(super) fn outline_surface(theme: &Theme, radius: f32) -> container::Style {
     container::Style {
-        border: border(BORDER, 1.0, radius),
-        ..surface(WHITE, radius)
+        border: border(appearance_color(theme, BORDER), 1.0, radius),
+        ..surface(classroom_palette(theme).background, radius)
     }
 }
 
 pub(super) fn divider_style(theme: &Theme) -> rule::Style {
-    rule::Style { color: BORDER, ..rule::default(theme) }
+    rule::Style { color: appearance_color(theme, BORDER), ..rule::default(theme) }
 }
 
 pub(super) fn quiet_style(theme: &Theme, status: button::Status) -> button::Style {
     button::Style {
         background: match status {
-            button::Status::Hovered | button::Status::Pressed => Some(SOFT.into()),
+            button::Status::Hovered | button::Status::Pressed => Some(appearance_color(theme, SOFT).into()),
             _ => None,
         },
-        text_color: if status == button::Status::Disabled { MUTED } else { theme.palette().text },
+        text_color: if status == button::Status::Disabled { appearance_color(theme, MUTED) } else { classroom_palette(theme).text },
         border: border(Color::TRANSPARENT, 0.0, 7.0),
         ..Default::default()
     }
@@ -144,34 +143,34 @@ pub(super) fn nav_style(theme: &Theme, active: bool, status: button::Status) -> 
     let mut style = quiet_style(theme, status);
     style.border.radius = 23.0.into();
     if active {
-        style.background = Some(ACTIVE_BG.into());
-        style.text_color = ACTIVE_FG;
+        style.background = Some(appearance_color(theme, ACTIVE_BG).into());
+        style.text_color = appearance_color(theme, ACTIVE_FG);
     }
     style
 }
 
 pub(super) fn outline_style(theme: &Theme, status: button::Status) -> button::Style {
     let mut style = quiet_style(theme, status);
-    style.text_color = if status == button::Status::Disabled { MUTED } else { ACTIVE_FG };
-    style.border = border(BORDER, 1.0, 7.0);
+    style.text_color = if status == button::Status::Disabled { appearance_color(theme, MUTED) } else { appearance_color(theme, ACTIVE_FG) };
+    style.border = border(appearance_color(theme, BORDER), 1.0, 7.0);
     style
 }
 
 pub(super) fn tab_style(theme: &Theme, active: bool, status: button::Status) -> button::Style {
     let mut style = quiet_style(theme, status);
-    style.text_color = if active { ACTIVE_FG } else { MUTED };
+    style.text_color = if active { appearance_color(theme, ACTIVE_FG) } else { appearance_color(theme, MUTED) };
     style
 }
 
 pub(super) fn primary_style(theme: &Theme, status: button::Status) -> button::Style {
     let background = match status {
-        button::Status::Hovered | button::Status::Pressed => color!(0x1765cc),
-        button::Status::Disabled => BORDER,
-        _ => theme.palette().primary,
+        button::Status::Hovered | button::Status::Pressed => appearance_color(theme, BLUE).scale_alpha(0.86),
+        button::Status::Disabled => appearance_color(theme, BORDER),
+        _ => classroom_palette(theme).primary,
     };
     button::Style {
         background: Some(background.into()),
-        text_color: if status == button::Status::Disabled { MUTED } else { WHITE },
+        text_color: if status == button::Status::Disabled { appearance_color(theme, MUTED) } else { if theme.extended_palette().is_dark { color!(0x171f2b) } else { WHITE } },
         border: border(Color::TRANSPARENT, 0.0, 7.0),
         ..Default::default()
     }
@@ -180,9 +179,9 @@ pub(super) fn primary_style(theme: &Theme, status: button::Status) -> button::St
 pub(super) fn card_style(theme: &Theme, status: button::Status) -> button::Style {
     let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: Some(theme.palette().background.into()),
-        text_color: theme.palette().text,
-        border: border(if hovered { color!(0xa1b9d9) } else { BORDER }, 1.0, 12.0),
+        background: Some(classroom_palette(theme).background.into()),
+        text_color: classroom_palette(theme).text,
+        border: border(if hovered { color!(0xa1b9d9) } else { appearance_color(theme, BORDER) }, 1.0, 12.0),
         shadow: if hovered {
             Shadow { color: Color::BLACK.scale_alpha(0.10), offset: Vector::new(0.0, 3.0), blur_radius: 10.0 }
         } else {
@@ -195,10 +194,10 @@ pub(super) fn card_style(theme: &Theme, status: button::Status) -> button::Style
 pub(super) fn search_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let mut style = text_input::default(theme, status);
     let active = matches!(status, text_input::Status::Focused { .. });
-    style.background = if active { WHITE.into() } else { SOFT.into() };
-    style.border = border(if active { BLUE } else { Color::TRANSPARENT }, 1.0, 8.0);
-    style.placeholder = MUTED;
-    style.value = FG;
+    style.background = if active { classroom_palette(theme).background.into() } else { appearance_color(theme, SOFT).into() };
+    style.border = border(if active { appearance_color(theme, BLUE) } else { Color::TRANSPARENT }, 1.0, 8.0);
+    style.placeholder = appearance_color(theme, MUTED);
+    style.value = classroom_palette(theme).text;
     style
 }
 
@@ -213,15 +212,15 @@ pub(super) fn coursework_row_with_preview<'a>(item: &'a Coursework, course_name:
         None => item.kind.label().into(),
     };
     let mut body = column![
-        text(&item.title).font(medium()).size(16).color(FG),
-        text(subtitle).size(13).color(MUTED)
+        text(&item.title).font(medium()).size(16).style(move |theme| themed_text(theme, FG)),
+        text(subtitle).size(13).style(move |theme| themed_text(theme, MUTED))
     ].spacing(4);
     if preview && !item.description.trim().is_empty() {
-        body = body.push(text(truncate(&item.description, 105)).size(14).color(MUTED));
+        body = body.push(text(truncate(&item.description, 105)).size(14).style(move |theme| themed_text(theme, MUTED)));
     }
     if preview && let Some(submission) = &item.submission {
         let label = grade_label(submission).unwrap_or_else(|| submission.status.label().into());
-        body = body.push(text(label).size(13).color(ACTIVE_FG));
+        body = body.push(text(label).size(13).style(move |theme| themed_text(theme, ACTIVE_FG)));
     }
     let due: Element<'_, Message> = match item.due_label.as_ref().filter(|_| preview) {
         Some(label) => pill(label, SOFT, MUTED),
@@ -229,12 +228,12 @@ pub(super) fn coursework_row_with_preview<'a>(item: &'a Coursework, course_name:
     };
     button(row![
         container(icon(glyph, ACTIVE_FG, 20)).center_x(42).center_y(42)
-            .style(|_| surface(ACTIVE_BG, 21.0)),
+            .style(|theme| surface(appearance_color(theme, ACTIVE_BG), 21.0)),
         body.width(Fill),
         due,
         icon(Icon::Arrow, MUTED, 18),
     ].spacing(13).align_y(Alignment::Center))
         .padding(16).width(Fill).style(card_style)
-        .on_press(Message::OpenItem(item.course_id, item.id.clone()))
+        .on_press(Message::Navigation(NavigationMessage::OpenItem(item.course_id, item.id.clone())))
         .into()
 }

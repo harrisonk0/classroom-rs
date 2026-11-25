@@ -7,7 +7,7 @@ fn confirmed_topic_deletion_preserves_posts_and_keeps_empty_topics_out_of_the_pu
     let id = original.iter().find_map(|item| item.topic_id.clone()).unwrap();
     app.install_snapshot(snapshot);
     app.screen = Screen::Course(1);
-    app.selected_topic = Some(id.clone());
+    app.classwork.selected_topic = Some(id.clone());
     let empty = desktop_data::Topic { id: "empty".into(), title: "Independent reading".into() };
     app.apply_teacher_topics(1, vec![empty.clone()], Some(&id));
     let snapshot = app.snapshot.as_ref().unwrap();
@@ -18,8 +18,8 @@ fn confirmed_topic_deletion_preserves_posts_and_keeps_empty_topics_out_of_the_pu
         assert_ne!(item.topic_id.as_deref(), Some(id.as_str()));
     }
     assert!(snapshot.topics_for(1).unwrap().is_empty());
-    assert_eq!(app.teacher_topics[&1], [empty]);
-    assert!(app.selected_topic.is_none());
+    assert_eq!(app.classwork.teacher_topics[&1], [empty]);
+    assert!(app.classwork.selected_topic.is_none());
 }
 
 #[test]
@@ -38,13 +38,13 @@ fn only_a_teacher_of_the_class_can_moderate_another_members_public_comment() {
     let (mut app, _) = fixture();
     let comment = Comment { id: "17".into(), author_id: Some(10), author: "Class member".into(),
         body: "A test comment".into(), created_label: None };
-    app.stream_viewer_id = Some(12);
+    app.stream.stream_viewer_id = Some(12);
     app.class_roles.insert(1, CourseRole::Student);
     app.class_roles.insert(2, CourseRole::Teacher);
     assert!(!app.may_delete_visible_comment(1, CommentAudience::Class, &comment));
     assert!(app.may_delete_visible_comment(2, CommentAudience::Class, &comment));
     assert!(!app.may_delete_visible_comment(2, CommentAudience::Private, &comment));
-    app.stream_viewer_id = Some(10);
+    app.stream.stream_viewer_id = Some(10);
     assert!(app.may_delete_visible_comment(1, CommentAudience::Class, &comment));
 }
 
@@ -65,20 +65,20 @@ fn failed_comment_send_preserves_multiline_drafts_until_confirmed() {
     let (mut app, snapshot) = fixture();
     app.install_snapshot(snapshot);
     let key = (1, 42);
-    for drafts in [&mut app.comment_drafts, &mut app.private_drafts] {
+    for drafts in [&mut app.comments.comment_drafts, &mut app.comments.private_drafts] {
         drafts.insert(key, text_editor::Content::with_text("First 📝\nSecond"));
     }
-    let _ = app.update(Message::CommentPosted(1, 42, Err("Unconfirmed".into())));
-    let _ = app.update(Message::PrivateCommentPosted(1, 42, Err("Unconfirmed".into())));
-    assert_eq!(app.comment_drafts[&key].text(), "First 📝\nSecond");
-    assert_eq!(app.private_drafts[&key].text(), "First 📝\nSecond");
-    let _ = app.update(Message::Navigate(Screen::Home));
-    assert_eq!(app.comment_drafts[&key].text(), "First 📝\nSecond");
-    assert_eq!(app.private_drafts[&key].text(), "First 📝\nSecond");
-    let _ = app.update(Message::CommentPosted(1, 42, Ok(())));
-    let _ = app.update(Message::PrivateCommentPosted(1, 42, Ok(())));
-    assert!(!app.comment_drafts.contains_key(&key));
-    assert!(!app.private_drafts.contains_key(&key));
+    let _ = app.update(Message::Comments(CommentsMessage::CommentPosted(1, 42, Err("Unconfirmed".into()))));
+    let _ = app.update(Message::Comments(CommentsMessage::PrivateCommentPosted(1, 42, Err("Unconfirmed".into()))));
+    assert_eq!(app.comments.comment_drafts[&key].text(), "First 📝\nSecond");
+    assert_eq!(app.comments.private_drafts[&key].text(), "First 📝\nSecond");
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Home)));
+    assert_eq!(app.comments.comment_drafts[&key].text(), "First 📝\nSecond");
+    assert_eq!(app.comments.private_drafts[&key].text(), "First 📝\nSecond");
+    let _ = app.update(Message::Comments(CommentsMessage::CommentPosted(1, 42, Ok(()))));
+    let _ = app.update(Message::Comments(CommentsMessage::PrivateCommentPosted(1, 42, Ok(()))));
+    assert!(!app.comments.comment_drafts.contains_key(&key));
+    assert!(!app.comments.private_drafts.contains_key(&key));
 }
 
 #[test]
@@ -91,20 +91,20 @@ fn switching_student_keeps_private_drafts_on_their_original_submissions() {
     app.screen = Screen::Item(1);
     app.item_id = Some("42".into());
     app.class_roles.insert(1, CourseRole::Teacher);
-    app.teacher_work = Some(TeacherWork {
+    app.grading.teacher_work = Some(TeacherWork {
         course: 1, item: 42, filter: StudentWorkFilter::All, students: vec![row(7), row(9)], selected: Some(7),
         grade: String::new(), confirming_return: false, bulk_selected: BTreeSet::new(), bulk_confirming: false,
     });
     let first = app.selected_teacher_feedback_key().unwrap();
-    let _ = app.update(Message::EditTeacherFeedback(first, "First thread".into()));
-    let _ = app.update(Message::SelectTeacherStudent(9));
+    let _ = app.update(Message::Teaching(TeachingMessage::EditTeacherFeedback(first, "First thread".into())));
+    let _ = app.update(Message::Teaching(TeachingMessage::SelectTeacherStudent(9)));
     let second = app.selected_teacher_feedback_key().unwrap();
-    let _ = app.update(Message::EditTeacherFeedback(first, "Stale edit".into()));
-    let _ = app.update(Message::EditTeacherFeedback(second, "Second thread".into()));
-    assert_eq!(app.teacher_feedback[&first].draft, "First thread");
-    assert_eq!(app.teacher_feedback[&second].draft, "Second thread");
-    let _ = app.update(Message::CloseItem);
-    assert!(app.teacher_feedback.is_empty());
+    let _ = app.update(Message::Teaching(TeachingMessage::EditTeacherFeedback(first, "Stale edit".into())));
+    let _ = app.update(Message::Teaching(TeachingMessage::EditTeacherFeedback(second, "Second thread".into())));
+    assert_eq!(app.grading.teacher_feedback[&first].draft, "First thread");
+    assert_eq!(app.grading.teacher_feedback[&second].draft, "Second thread");
+    let _ = app.update(Message::Navigation(NavigationMessage::CloseItem));
+    assert!(app.grading.teacher_feedback.is_empty());
 }
 
 #[test]
@@ -114,19 +114,19 @@ fn bulk_return_selection_respects_filter_and_skips_unreturnable_rows() {
         student_id, submission_id: 100 + student_id, remote_state: Some(remote_state),
         name: None, status, released_grade: None, draft_grade: None, attachments: Vec::new(), answer: None,
     };
-    app.teacher_work = Some(TeacherWork {
+    app.grading.teacher_work = Some(TeacherWork {
         course: 1, item: 42, filter: StudentWorkFilter::TurnedIn, selected: None, grade: String::new(),
         confirming_return: false, bulk_confirming: false, bulk_selected: BTreeSet::new(),
         students: vec![row(1, SubmissionStatus::TurnedIn, 2), row(2, SubmissionStatus::Assigned, 4)],
     });
-    let _ = app.update(Message::SelectVisibleReturns(true));
-    let _ = app.update(Message::SelectBulkReturn(2, true));
-    assert_eq!(app.teacher_work.as_ref().unwrap().bulk_selected, BTreeSet::from([1]));
-    let _ = app.update(Message::FilterStudentWork(StudentWorkFilter::Assigned));
-    let _ = app.update(Message::ConfirmBulkReturn(true));
-    assert!(app.teacher_work.as_ref().unwrap().bulk_confirming);
-    let _ = app.update(Message::ClearBulkReturns);
-    assert!(app.teacher_work.as_ref().unwrap().bulk_selected.is_empty());
+    let _ = app.update(Message::Teaching(TeachingMessage::SelectVisibleReturns(true)));
+    let _ = app.update(Message::Teaching(TeachingMessage::SelectBulkReturn(2, true)));
+    assert_eq!(app.grading.teacher_work.as_ref().unwrap().bulk_selected, BTreeSet::from([1]));
+    let _ = app.update(Message::Teaching(TeachingMessage::FilterStudentWork(StudentWorkFilter::Assigned)));
+    let _ = app.update(Message::Teaching(TeachingMessage::ConfirmBulkReturn(true)));
+    assert!(app.grading.teacher_work.as_ref().unwrap().bulk_confirming);
+    let _ = app.update(Message::Teaching(TeachingMessage::ClearBulkReturns));
+    assert!(app.grading.teacher_work.as_ref().unwrap().bulk_selected.is_empty());
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn classwork_queues_unpublished_reads_only_for_a_confirmed_teacher() {
             DetailRead::Submissions(1)
         })));
     }
-    app.teacher_topics.insert(1, Vec::new());
+    app.classwork.teacher_topics.insert(1, Vec::new());
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::TeacherDrafts(1))));
 }
 
@@ -193,20 +193,20 @@ fn classwork_queues_unpublished_reads_only_for_a_confirmed_teacher() {
 fn personal_copy_checks_reset_with_snapshot_and_discard_stale_reads() {
     let (mut app, snapshot) = fixture();
     app.install_snapshot(snapshot.clone());
-    app.personal_copy_checks.insert((1, 42), ("template".into(), true));
-    app.pending_personal_copy = Some((1, 42, "template".into()));
-    app.personal_copy_loading_generation = Some(app.personal_copy_generation);
+    app.attachments.personal_copy_checks.insert((1, 42), ("template".into(), true));
+    app.attachments.pending_personal_copy = Some((1, 42, "template".into()));
+    app.attachments.personal_copy_loading_generation = Some(app.attachments.personal_copy_generation);
     app.install_snapshot(snapshot);
-    assert!(app.personal_copy_checks.is_empty());
-    assert!(app.pending_personal_copy.is_none());
-    let _ = app.update(Message::DetailLoaded(DetailRead::PersonalCopy(1, 42),
-        Ok(DetailData::PersonalCopy("template".into(), true))));
-    assert!(app.personal_copy_checks.is_empty());
-    app.personal_copy_checks.insert((1, 42), ("template".into(), true));
-    app.pending_personal_copy = Some((1, 42, "template".into()));
-    let _ = app.update(Message::SessionForgotten(Ok(())));
-    assert!(app.personal_copy_checks.is_empty());
-    assert!(app.pending_personal_copy.is_none());
+    assert!(app.attachments.personal_copy_checks.is_empty());
+    assert!(app.attachments.pending_personal_copy.is_none());
+    let _ = app.update(Message::Reads(ReadsMessage::DetailLoaded(DetailRead::PersonalCopy(1, 42),
+        Ok(DetailData::PersonalCopy("template".into(), true)))));
+    assert!(app.attachments.personal_copy_checks.is_empty());
+    app.attachments.personal_copy_checks.insert((1, 42), ("template".into(), true));
+    app.attachments.pending_personal_copy = Some((1, 42, "template".into()));
+    let _ = app.update(Message::Session(SessionMessage::SessionForgotten(Ok(()))));
+    assert!(app.attachments.personal_copy_checks.is_empty());
+    assert!(app.attachments.pending_personal_copy.is_none());
 }
 
 #[test]
@@ -251,7 +251,7 @@ fn a_personal_template_only_opens_an_exact_current_submission_copy() {
     item.submission = Some(Submission { attachments: vec![mine.clone()], ..Default::default() });
     assert!(matches!(
         matching_personal_copy(&item, &template).and_then(|copy| app.attachment_action(copy)),
-        Some(Message::OpenAttachment(url)) if Some(&url) == mine.url.as_ref()
+        Some(Message::Attachments(AttachmentsMessage::OpenAttachment(url))) if Some(&url) == mine.url.as_ref()
     ));
     item.submission.as_mut().unwrap().attachments[0].url = template.url.clone();
     let copy = matching_personal_copy(&item, &template).unwrap();
@@ -268,13 +268,13 @@ fn leaving_an_assignment_ignores_its_pending_microphone_permission() {
     app.install_snapshot(snapshot);
     app.screen = Screen::Item(1);
     app.item_id = Some("42".into());
-    app.submission_capture = Some(CaptureState::AskingPermission);
-    let generation = app.capture_generation;
-    let _ = app.update(Message::Navigate(Screen::Home));
-    let _ = app.update(Message::Capture(CaptureAction::Permission(generation, true)));
+    app.attachments.submission_capture = Some(CaptureState::AskingPermission);
+    let generation = app.attachments.capture_generation;
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Home)));
+    let _ = app.update(Message::Navigation(NavigationMessage::Capture(CaptureAction::Permission(generation, true))));
     assert_eq!(app.screen, Screen::Home);
-    assert!(app.submission_capture.is_none());
-    assert_ne!(app.capture_generation, generation);
+    assert!(app.attachments.submission_capture.is_none());
+    assert_ne!(app.attachments.capture_generation, generation);
 }
 
 #[test]
@@ -296,12 +296,12 @@ fn leaving_people_invalidates_pending_email_lookup() {
     app.install_snapshot(snapshot);
     app.screen = Screen::Course(1);
     app.tab = Tab::People;
-    app.people_email_pending = Some((1, 7));
-    let generation = app.people_email_generation;
-    let _ = app.update(Message::SetTab(Tab::Stream));
-    assert_eq!(app.people_email_pending, None);
-    assert_ne!(app.people_email_generation, generation);
-    let _ = app.update(Message::ClassMemberEmailLoaded(generation, 1, 7, Ok(Vec::new())));
+    app.people.people_email_pending = Some((1, 7));
+    let generation = app.people.people_email_generation;
+    let _ = app.update(Message::Navigation(NavigationMessage::SetTab(Tab::Stream)));
+    assert_eq!(app.people.people_email_pending, None);
+    assert_ne!(app.people.people_email_generation, generation);
+    let _ = app.update(Message::Comments(CommentsMessage::ClassMemberEmailLoaded(generation, 1, 7, Ok(Vec::new()))));
     assert!(app.error.is_none());
 }
 
@@ -321,19 +321,19 @@ fn dropped_files_stage_only_nonempty_regular_files_and_preserve_existing_selecti
     fs::write(&empty, "").unwrap();
     let (mut app, _) = fixture();
     app.stage_submission_file(1, 42, good.clone(), validate_submission_file(&good));
-    assert_eq!(app.submission_file, Some((1, 42, good.clone())));
+    assert_eq!(app.attachments.submission_file, Some((1, 42, good.clone())));
     for bad in [empty, directory.path().to_owned(), directory.path().join("missing")] {
         let result = validate_submission_file(&bad);
         app.stage_submission_file(1, 42, bad, result);
-        assert_eq!(app.submission_file, Some((1, 42, good.clone())));
+        assert_eq!(app.attachments.submission_file, Some((1, 42, good.clone())));
         assert!(app.error.is_some());
     }
     let long = PathBuf::from("a".repeat(8193));
     assert!(validate_submission_file(&long).is_err());
 
-    let _ = app.update(Message::SubmissionFileDropped(good.clone()));
-    assert_eq!(app.submission_file, Some((1, 42, good)));
-    assert!(!app.sending_submission);
+    let _ = app.update(Message::Submissions(SubmissionsMessage::SubmissionFileDropped(good.clone())));
+    assert_eq!(app.attachments.submission_file, Some((1, 42, good)));
+    assert!(!app.student_work.sending_submission);
 }
 
 #[test]
@@ -414,38 +414,38 @@ fn shared_question_read_requires_current_student_submission_state() {
 fn calendar_filters_by_week_and_active_class() {
     let (mut app, mut snapshot) = fixture();
     let today = Local::now().date_naive();
-    app.calendar_monday = monday_of(today);
-    let original_week = app.calendar_monday;
+    app.deadlines.calendar_monday = monday_of(today);
+    let original_week = app.deadlines.calendar_monday;
     let mut archived_item = snapshot.coursework_for(1).unwrap()[1].clone();
     archived_item.course_id = 6;
     snapshot.coursework.get_mut(&6).unwrap().push(archived_item);
     app.install_snapshot(snapshot);
 
-    assert_eq!(app.calendar_items(app.calendar_monday).values().flatten().count(), 4);
+    assert_eq!(app.calendar_items(app.deadlines.calendar_monday).values().flatten().count(), 4);
     assert!(app.active_course_options().iter().all(|class| class.id != Some(6)));
     let class = app.active_course_options().into_iter().find(|class| class.id == Some(1)).unwrap();
-    let _ = app.update(Message::CalendarFilter(class));
-    let events: Vec<_> = app.calendar_items(app.calendar_monday).into_values().flatten().collect();
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::CalendarFilter(class)));
+    let events: Vec<_> = app.calendar_items(app.deadlines.calendar_monday).into_values().flatten().collect();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].0.title, "Poetry comparison");
 
-    let _ = app.update(Message::CalendarShift(1));
-    assert_eq!(app.calendar_monday, original_week + Days::new(7));
-    assert!(app.calendar_items(app.calendar_monday).is_empty());
-    let _ = app.update(Message::CalendarShift(-1));
-    assert_eq!(app.calendar_monday, original_week);
-    let _ = app.update(Message::CalendarShift(-1));
-    let _ = app.update(Message::CalendarToday);
-    assert_eq!(app.calendar_monday, original_week);
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::CalendarShift(1)));
+    assert_eq!(app.deadlines.calendar_monday, original_week + Days::new(7));
+    assert!(app.calendar_items(app.deadlines.calendar_monday).is_empty());
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::CalendarShift(-1)));
+    assert_eq!(app.deadlines.calendar_monday, original_week);
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::CalendarShift(-1)));
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::CalendarToday));
+    assert_eq!(app.deadlines.calendar_monday, original_week);
 
-    let _ = app.update(Message::Navigate(Screen::Calendar));
-    let (id, item) = app.calendar_items(app.calendar_monday).into_values().flatten().next()
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Calendar)));
+    let (id, item) = app.calendar_items(app.deadlines.calendar_monday).into_values().flatten().next()
         .map(|(item, course)| (course.id, item.id.clone())).unwrap();
-    let _ = app.update(Message::OpenItem(id, item));
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenItem(id, item)));
     assert_eq!(app.screen, Screen::Item(1));
-    let _ = app.update(Message::CloseItem);
+    let _ = app.update(Message::Navigation(NavigationMessage::CloseItem));
     assert_eq!(app.screen, Screen::Calendar);
-    assert_eq!(app.calendar_class, Some(1));
+    assert_eq!(app.deadlines.calendar_class, Some(1));
 }
 
 #[test]
@@ -480,9 +480,9 @@ fn folder_load_discards_the_previous_session_result_and_hides_links_offline() {
     let url = "https://drive.google.com/drive/folders/test";
     app.reset_class_folders();
     let details = || desktop_auth::OwnClassDetails { folders: BTreeMap::from([(1, url.into())]), ..Default::default() };
-    let _ = app.update(Message::ClassFoldersLoaded(old_generation, Ok(details())));
+    let _ = app.update(Message::Reads(ReadsMessage::ClassFoldersLoaded(old_generation, Ok(details()))));
     assert!(app.class_folder_url(1).is_none());
-    let _ = app.update(Message::ClassFoldersLoaded(app.class_folders_generation, Ok(details())));
+    let _ = app.update(Message::Reads(ReadsMessage::ClassFoldersLoaded(app.class_folders_generation, Ok(details()))));
     assert_eq!(app.class_folder_url(1), Some(url));
     snapshot.source = SnapshotSource::Cache;
     app.install_snapshot(snapshot);
@@ -497,13 +497,13 @@ fn edited_short_answer_requires_a_change_and_survives_a_failed_request() {
     let revision = desktop_auth::ShortAnswerRevision {
         submission_id: 67, answer: original.clone(),
     };
-    app.short_answer_drafts.insert(key, text_editor::Content::with_text(&original));
-    app.short_answer_revisions.insert(key, revision);
+    app.student_work.short_answer_drafts.insert(key, text_editor::Content::with_text(&original));
+    app.student_work.short_answer_revisions.insert(key, revision);
     assert!(app.question_draft(key, &QuestionDetails::ShortAnswer).is_none());
-    app.short_answer_drafts.insert(key, text_editor::Content::with_text("Revised"));
+    app.student_work.short_answer_drafts.insert(key, text_editor::Content::with_text("Revised"));
     assert_eq!(app.question_draft(key, &QuestionDetails::ShortAnswer),
         Some(QuestionAnswer::ShortAnswer("Revised".into())));
-    let _ = app.update(Message::QuestionAnswerSent(key.0, key.1, Err("Retry after checking.".into())));
+    let _ = app.update(Message::Submissions(SubmissionsMessage::QuestionAnswerSent(key.0, key.1, Err("Retry after checking.".into()))));
     assert_eq!(app.question_draft(key, &QuestionDetails::ShortAnswer),
         Some(QuestionAnswer::ShortAnswer("Revised".into())));
     assert_eq!(app.error.as_deref(), Some("Retry after checking."));
@@ -573,35 +573,35 @@ fn classwork_groups_only_published_work_and_keeps_untagged_items_first() {
 fn classwork_item_and_topic_preview_state_survives_opening_instructions() {
     let (mut app, snapshot) = fixture();
     app.install_snapshot(snapshot);
-    let _ = app.update(Message::Navigate(Screen::Course(1)));
-    let _ = app.update(Message::SetTab(Tab::Classwork));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(1))));
+    let _ = app.update(Message::Navigation(NavigationMessage::SetTab(Tab::Classwork)));
     let item = "demo-poetry";
     let topic = "demo-poetry-unit";
     let key = ClassworkGroupId::Topic(topic.into());
     assert!(!app.classwork_item_expanded(item));
 
-    let _ = app.update(Message::SetClassworkGroups(1, true));
-    assert!(app.collapsed_classwork_groups.contains(&key));
-    let _ = app.update(Message::ToggleClassworkGroup(1, key.clone()));
-    assert!(!app.collapsed_classwork_groups.contains(&key));
-    let _ = app.update(Message::ToggleClassworkItem(1, item.into()));
+    let _ = app.update(Message::Navigation(NavigationMessage::SetClassworkGroups(1, true)));
+    assert!(app.classwork.collapsed_classwork_groups.contains(&key));
+    let _ = app.update(Message::Navigation(NavigationMessage::ToggleClassworkGroup(1, key.clone())));
+    assert!(!app.classwork.collapsed_classwork_groups.contains(&key));
+    let _ = app.update(Message::Navigation(NavigationMessage::ToggleClassworkItem(1, item.into())));
     assert!(app.classwork_item_expanded(item));
-    let _ = app.update(Message::OpenItem(1, item.into()));
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenItem(1, item.into())));
     assert_eq!(app.screen, Screen::Item(1));
-    let _ = app.update(Message::CloseItem);
+    let _ = app.update(Message::Navigation(NavigationMessage::CloseItem));
     assert_eq!((app.screen, app.tab), (Screen::Course(1), Tab::Classwork));
     assert!(app.classwork_item_expanded(item));
 
-    let _ = app.update(Message::SelectTopic(Some(topic.into())));
+    let _ = app.update(Message::Navigation(NavigationMessage::SelectTopic(Some(topic.into()))));
     assert!(app.classwork_item_expanded(item));
-    let _ = app.update(Message::ToggleClassworkItem(1, item.into()));
+    let _ = app.update(Message::Navigation(NavigationMessage::ToggleClassworkItem(1, item.into())));
     assert!(!app.classwork_item_expanded(item));
-    let _ = app.update(Message::SelectTopic(None));
+    let _ = app.update(Message::Navigation(NavigationMessage::SelectTopic(None)));
     assert!(!app.classwork_item_expanded(item));
-    let _ = app.update(Message::SetClassworkGroups(1, false));
-    assert!(app.collapsed_classwork_groups.is_empty());
-    let _ = app.update(Message::Navigate(Screen::Course(2)));
-    assert!(app.classwork_toggles.is_empty());
+    let _ = app.update(Message::Navigation(NavigationMessage::SetClassworkGroups(1, false)));
+    assert!(app.classwork.collapsed_classwork_groups.is_empty());
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(2))));
+    assert!(app.classwork.classwork_toggles.is_empty());
 }
 
 #[test]
@@ -638,9 +638,9 @@ fn home_due_soon_uses_local_days_and_open_work_across_active_classes() {
     assert_eq!(upcoming(Some(2), 5), ["today-date", "last-day"]);
 
     app.install_snapshot(snapshot);
-    let _ = app.update(Message::OpenItem(1, "today-time".into()));
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenItem(1, "today-time".into())));
     assert_eq!(app.screen, Screen::Item(1));
-    let _ = app.update(Message::CloseItem);
+    let _ = app.update(Message::Navigation(NavigationMessage::CloseItem));
     assert_eq!(app.screen, Screen::Home);
 }
 
@@ -684,34 +684,34 @@ fn todo_routes_unknown_work_class_filters_and_group_collapsing() {
     snapshot.coursework.get_mut(&6).unwrap().push(archived_item);
     app.install_snapshot(snapshot);
 
-    let groups = app.todo_items(today, app.todo_filter);
+    let groups = app.todo_items(today, app.deadlines.todo_filter);
     assert_eq!(groups[&TodoGroup::ThisWeek][0].0.id, "demo-poetry");
     assert!(groups[&TodoGroup::StatusUnavailable].iter().any(|(item, _)| item.id == "demo-sort"));
     assert!(groups.values().flatten().all(|(_, course)| course.id != 6));
 
     let filter = app.active_course_options().into_iter().find(|class| class.id == Some(5)).unwrap();
-    let _ = app.update(Message::FilterTodoClass(filter));
-    assert!(app.todo_items(today, app.todo_filter).is_empty());
-    let _ = app.update(Message::SetTodoFilter(TodoFilter::Missing));
-    let groups = app.todo_items(today, app.todo_filter);
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::FilterTodoClass(filter)));
+    assert!(app.todo_items(today, app.deadlines.todo_filter).is_empty());
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::SetTodoFilter(TodoFilter::Missing)));
+    let groups = app.todo_items(today, app.deadlines.todo_filter);
     assert_eq!(groups[&TodoGroup::ThisWeek][0].0.id, "demo-waves");
-    let _ = app.update(Message::ToggleTodoGroup(TodoGroup::ThisWeek));
-    assert!(app.collapsed_todo_groups.contains(&(TodoFilter::Missing, TodoGroup::ThisWeek)));
-    assert!(!app.collapsed_todo_groups.contains(&(TodoFilter::Assigned, TodoGroup::ThisWeek)));
-    let _ = app.update(Message::ToggleTodoGroup(TodoGroup::ThisWeek));
-    assert!(app.collapsed_todo_groups.is_empty());
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::ToggleTodoGroup(TodoGroup::ThisWeek)));
+    assert!(app.deadlines.collapsed_todo_groups.contains(&(TodoFilter::Missing, TodoGroup::ThisWeek)));
+    assert!(!app.deadlines.collapsed_todo_groups.contains(&(TodoFilter::Assigned, TodoGroup::ThisWeek)));
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::ToggleTodoGroup(TodoGroup::ThisWeek)));
+    assert!(app.deadlines.collapsed_todo_groups.is_empty());
 
     let all_classes = app.active_course_options().remove(0);
-    let _ = app.update(Message::FilterTodoClass(all_classes));
-    let _ = app.update(Message::SetTodoFilter(TodoFilter::Done));
-    assert_eq!(app.todo_items(today, app.todo_filter).values().flatten().count(), 1);
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::FilterTodoClass(all_classes)));
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::SetTodoFilter(TodoFilter::Done)));
+    assert_eq!(app.todo_items(today, app.deadlines.todo_filter).values().flatten().count(), 1);
 }
 
 #[test]
 fn your_work_routes_to_the_class_and_filters_only_released_grades() {
     let (mut app, snapshot) = fixture();
     app.install_snapshot(snapshot);
-    let _ = app.update(Message::OpenYourWork(2));
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenYourWork(2)));
     assert_eq!((app.screen, app.tab), (Screen::Course(2), Tab::YourWork));
     let math = &app.snapshot.as_ref().unwrap().coursework_for(2).unwrap()[0];
     let missing = &app.snapshot.as_ref().unwrap().coursework_for(5).unwrap()[0];
@@ -720,9 +720,9 @@ fn your_work_routes_to_the_class_and_filters_only_released_grades() {
     assert!(WorkFilter::Missing.includes(missing));
     assert!(!WorkFilter::ReturnedWithGrade.includes(missing));
 
-    let _ = app.update(Message::SetWorkFilter(WorkFilter::Missing));
-    let _ = app.update(Message::OpenYourWork(1));
-    assert_eq!(app.work_filter, WorkFilter::All);
+    let _ = app.update(Message::Deadlines(DeadlinesMessage::SetWorkFilter(WorkFilter::Missing)));
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenYourWork(1)));
+    assert_eq!(app.student_work.work_filter, WorkFilter::All);
 }
 
 #[test]
@@ -735,9 +735,9 @@ fn home_invitations_are_nonblocking_and_reject_stale_results() {
     let old = app.invitation_generation;
     app.invalidate_invitation_read();
     let invited = Course { id: 799, title: "Art fixture".into(), ..Default::default() };
-    let _ = app.update(Message::InvitationsLoaded(old, Ok(vec![invited.clone()])));
+    let _ = app.update(Message::Courses(CoursesMessage::InvitationsLoaded(old, Ok(vec![invited.clone()]))));
     assert!(app.invitations.is_none());
-    let _ = app.update(Message::InvitationsLoaded(app.invitation_generation, Ok(vec![duplicate, invited])));
+    let _ = app.update(Message::Courses(CoursesMessage::InvitationsLoaded(app.invitation_generation, Ok(vec![duplicate, invited]))));
     assert_eq!(app.pending_invitations().map(|course| course.id).collect::<Vec<_>>(), [799]);
     assert!(!app.can_respond_to_invitation(799)); // The fixture has no live session.
 }
@@ -749,14 +749,14 @@ fn confirmed_join_waits_for_the_joined_class_in_the_refreshed_list() {
     app.screen = Screen::Join;
     let invited = Course { id: 799, title: "Art fixture".into(), ..Default::default() };
     app.invitations = Some(vec![invited.clone()]);
-    let _ = app.update(Message::MembershipFinished(Ok(MembershipChange::Joined(799))));
+    let _ = app.update(Message::Courses(CoursesMessage::MembershipFinished(Ok(MembershipChange::Joined(799)))));
     assert_eq!(app.screen, Screen::Home);
     assert!(app.pending_invitations().next().is_none());
     assert_eq!(app.opening_joined_course, Some(799));
-    let _ = app.update(Message::Refreshed(Ok(Arc::new(snapshot.clone()))));
+    let _ = app.update(Message::Session(SessionMessage::Refreshed(Ok(Arc::new(snapshot.clone())))));
     assert_eq!(app.screen, Screen::Home);
     snapshot.courses.push(invited);
-    let _ = app.update(Message::Refreshed(Ok(Arc::new(snapshot))));
+    let _ = app.update(Message::Session(SessionMessage::Refreshed(Ok(Arc::new(snapshot)))));
     assert_eq!((app.screen, app.tab), (Screen::Course(799), Tab::Stream));
     assert!(app.opening_joined_course.is_none());
 }
@@ -771,8 +771,8 @@ fn declining_an_invitation_keeps_the_current_page_and_other_classes() {
     let second = Course { id: 702, title: "Maths fixture".into(), ..Default::default() };
     app.invitations = Some(vec![first.clone(), second.clone()]);
     let previous_generation = app.invitation_generation;
-    let _ = app.update(Message::InvitationDeclined(Ok(vec![second])));
-    let _ = app.update(Message::InvitationsLoaded(previous_generation, Ok(vec![first])));
+    let _ = app.update(Message::Courses(CoursesMessage::InvitationDeclined(Ok(vec![second]))));
+    let _ = app.update(Message::Courses(CoursesMessage::InvitationsLoaded(previous_generation, Ok(vec![first]))));
     assert_eq!(app.screen, Screen::Join);
     assert_eq!(app.pending_invitations().map(|course| course.id).collect::<Vec<_>>(), [702]);
     assert_eq!(app.snapshot.unwrap().courses.iter().map(|course| course.id).collect::<Vec<_>>(), enrolled);
@@ -803,9 +803,9 @@ fn opening_pages_selects_the_required_reads() {
     app.tab = Tab::YourWork;
     let snapshot = Snapshot::demo();
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::Submissions(1))));
-    app.submissions_checked.insert(1);
+    app.student_work.submissions_checked.insert(1);
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::OverallGrade(1))));
-    let _ = app.update(Message::DetailLoaded(DetailRead::OverallGrade(1), Ok(DetailData::OverallGrade(None))));
+    let _ = app.update(Message::Reads(ReadsMessage::DetailLoaded(DetailRead::OverallGrade(1), Ok(DetailData::OverallGrade(None)))));
     assert_eq!(app.next_page_read(&snapshot), None);
 }
 
@@ -814,14 +814,14 @@ fn opening_classwork_fetches_submission_status_after_coursework() {
     let (mut app, mut snapshot) = fixture();
     let items = snapshot.coursework.remove(&1).unwrap();
     app.install_snapshot(snapshot);
-    let _ = app.update(Message::Navigate(Screen::Course(1)));
-    let _ = app.update(Message::SetTab(Tab::Classwork));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(1))));
+    let _ = app.update(Message::Navigation(NavigationMessage::SetTab(Tab::Classwork)));
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()), Some(PageRead::Coursework(1)));
 
-    let _ = app.update(Message::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None }))));
+    let _ = app.update(Message::Reads(ReadsMessage::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None })))));
     let submissions = DetailRead::Submissions(1);
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()), Some(PageRead::Detail(submissions)));
-    let _ = app.update(Message::DetailLoaded(submissions, Ok(DetailData::Submissions(vec![]))));
+    let _ = app.update(Message::Reads(ReadsMessage::DetailLoaded(submissions, Ok(DetailData::Submissions(vec![])))));
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()), None);
 }
 
@@ -852,12 +852,12 @@ fn returning_to_a_page_retries_only_its_failed_reads() {
     app.page_errors.insert(roster, "Timed out".into());
     app.page_errors.insert(other_roster, "Timed out".into());
 
-    let _ = app.update(Message::Navigate(Screen::Course(1)));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(1))));
     assert!(app.page_errors.contains_key(&roster));
-    let _ = app.update(Message::SetTab(Tab::People));
+    let _ = app.update(Message::Navigation(NavigationMessage::SetTab(Tab::People)));
     assert_eq!(app.next_page_read(&snapshot), Some(roster));
     assert!(app.page_errors.contains_key(&other_roster));
-    let _ = app.update(Message::DetailLoaded(DetailRead::Roster(1), Err("Timed out again".into())));
+    let _ = app.update(Message::Reads(ReadsMessage::DetailLoaded(DetailRead::Roster(1), Err("Timed out again".into()))));
     assert_eq!(app.next_page_read(&snapshot), None);
 }
 
@@ -865,22 +865,22 @@ fn returning_to_a_page_retries_only_its_failed_reads() {
 fn stream_checks_permissions_automatically_and_keeps_an_unconfirmed_draft() {
     let (mut app, snapshot) = fixture();
     app.install_snapshot(snapshot.clone());
-    let _ = app.update(Message::Navigate(Screen::Course(1)));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(1))));
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::StreamAccess(1)));
-    let generation = app.stream_access_generation;
-    let _ = app.update(Message::StreamAccessLoaded(generation, 1, Ok((9, StreamAccess::ReadOnly))));
-    let _ = app.update(Message::OpenStreamComposer(1));
-    assert!(app.open_stream_composer.is_none());
-    app.stream_drafts.insert(1, StreamDraft {
+    let generation = app.stream.stream_access_generation;
+    let _ = app.update(Message::Reads(ReadsMessage::StreamAccessLoaded(generation, 1, Ok((9, StreamAccess::ReadOnly)))));
+    let _ = app.update(Message::Stream(StreamMessage::OpenStreamComposer(1)));
+    assert!(app.stream.open_stream_composer.is_none());
+    app.stream.stream_drafts.insert(1, StreamDraft {
         body: text_editor::Content::with_text("Unconfirmed draft"),
         links: vec!["https://example.org/lesson".into()],
         ..Default::default()
     });
-    app.sending_stream_post = Some(1);
-    let _ = app.update(Message::StreamPostSent(1, Err("Unconfirmed".into())));
-    assert_eq!(app.stream_drafts[&1].body.text().trim(), "Unconfirmed draft");
-    assert_eq!(app.stream_drafts[&1].links, ["https://example.org/lesson"]);
-    assert!(!app.stream_access.contains_key(&1));
+    app.stream.sending_stream_post = Some(1);
+    let _ = app.update(Message::Stream(StreamMessage::StreamPostSent(1, Err("Unconfirmed".into()))));
+    assert_eq!(app.stream.stream_drafts[&1].body.text().trim(), "Unconfirmed draft");
+    assert_eq!(app.stream.stream_drafts[&1].links, ["https://example.org/lesson"]);
+    assert!(!app.stream.stream_access.contains_key(&1));
     assert!(!valid_stream_draft(" \n "));
 }
 
@@ -888,19 +888,19 @@ fn stream_checks_permissions_automatically_and_keeps_an_unconfirmed_draft() {
 fn pending_local_file_cannot_be_silently_left_out_of_a_post() {
     let (mut app, snapshot) = fixture();
     app.install_snapshot(snapshot);
-    app.stream_drafts.insert(1, StreamDraft {
+    app.stream.stream_drafts.insert(1, StreamDraft {
         body: text_editor::Content::with_text("Draft with file"),
         ..Default::default()
     });
-    app.choosing_stream_file = Some(1);
+    app.stream.choosing_stream_file = Some(1);
     let path = PathBuf::from("Reading notes.pdf");
-    let _ = app.update(Message::StreamFileChosen(1, Ok(Some(path.clone()))));
-    assert!(!app.stream_drafts[&1].can_send("Draft with file"));
-    app.uploading_stream_file = Some(1);
-    let _ = app.update(Message::StreamFileUploaded(1, Err("Drive did not confirm the upload.".into())));
-    assert_eq!(app.stream_drafts[&1].selected_file.as_ref(), Some(&path));
-    assert_eq!(app.stream_drafts[&1].body.text().trim(), "Draft with file");
-    assert!(!app.stream_drafts[&1].can_send("Draft with file"));
+    let _ = app.update(Message::Stream(StreamMessage::StreamFileChosen(1, Ok(Some(path.clone())))));
+    assert!(!app.stream.stream_drafts[&1].can_send("Draft with file"));
+    app.stream.uploading_stream_file = Some(1);
+    let _ = app.update(Message::Stream(StreamMessage::StreamFileUploaded(1, Err("Drive did not confirm the upload.".into()))));
+    assert_eq!(app.stream.stream_drafts[&1].selected_file.as_ref(), Some(&path));
+    assert_eq!(app.stream.stream_drafts[&1].body.text().trim(), "Draft with file");
+    assert!(!app.stream.stream_drafts[&1].can_send("Draft with file"));
 }
 
 #[test]
@@ -961,18 +961,18 @@ fn stream_delete_only_removes_the_confirmed_announcement() {
     let announcement = items.iter_mut().find(|item| item.kind == CourseworkKind::Announcement).unwrap();
     announcement.id = "91".into();
     announcement.author_id = Some(9);
-    app.stream_viewer_id = Some(10);
+    app.stream.stream_viewer_id = Some(10);
     assert!(!app.owns_announcement(announcement));
-    app.stream_viewer_id = Some(9);
+    app.stream.stream_viewer_id = Some(9);
     assert!(app.owns_announcement(announcement));
     let before = items.len();
     app.install_snapshot(snapshot);
-    app.deleting_stream_post = Some((1, 91));
-    let _ = app.update(Message::StreamPostDeleted(1, 92, Ok(())));
-    let _ = app.update(Message::StreamPostDeleted(1, 91, Err("Unconfirmed".into())));
+    app.stream.deleting_stream_post = Some((1, 91));
+    let _ = app.update(Message::Stream(StreamMessage::StreamPostDeleted(1, 92, Ok(()))));
+    let _ = app.update(Message::Stream(StreamMessage::StreamPostDeleted(1, 91, Err("Unconfirmed".into()))));
     assert_eq!(app.snapshot.as_ref().unwrap().coursework_for(1).unwrap().len(), before);
-    app.deleting_stream_post = Some((1, 91));
-    let _ = app.update(Message::StreamPostDeleted(1, 91, Ok(())));
+    app.stream.deleting_stream_post = Some((1, 91));
+    let _ = app.update(Message::Stream(StreamMessage::StreamPostDeleted(1, 91, Ok(()))));
     let items = app.snapshot.as_ref().unwrap().coursework_for(1).unwrap();
     assert_eq!(items.len(), before - 1);
     assert!(items.iter().all(|item| item.id != "91"));
@@ -989,15 +989,15 @@ fn deleting_a_private_comment_preserves_the_class_thread_with_the_same_id() {
     item.id = "42".into();
     item.comments = Some(vec![fixture.clone()]);
     app.install_snapshot(snapshot);
-    app.stream_viewer_id = Some(11);
+    app.stream.stream_viewer_id = Some(11);
     assert!(!app.owns_comment(&fixture));
-    app.stream_viewer_id = Some(12);
+    app.stream.stream_viewer_id = Some(12);
     assert!(app.owns_comment(&fixture));
-    app.private_feedback.insert((1, 42), vec![fixture]);
+    app.comments.private_feedback.insert((1, 42), vec![fixture]);
     let target = CommentTarget { course: 1, item: 42, id: 19, audience: CommentAudience::Private };
-    app.deleting_comment = Some(target);
-    let _ = app.update(Message::CommentDeleted(target, Ok(())));
-    assert!(app.private_feedback[&(1, 42)].is_empty());
+    app.comments.deleting_comment = Some(target);
+    let _ = app.update(Message::Comments(CommentsMessage::CommentDeleted(target, Ok(()))));
+    assert!(app.comments.private_feedback[&(1, 42)].is_empty());
     assert_eq!(app.snapshot.as_ref().unwrap().coursework_for(1).unwrap()[0].comments.as_ref().unwrap().len(), 1);
 }
 
@@ -1017,20 +1017,20 @@ fn dragging_a_class_uses_its_direction_and_skips_hidden_targets() {
 fn settings_use_confirmed_values_and_ignore_stale_notification_reads() {
     let (mut app, snapshot) = fixture();
     app.install_snapshot(snapshot);
-    let _ = app.update(Message::Navigate(Screen::Settings));
-    let generation = app.notifications_generation;
-    let _ = app.update(Message::ClassNotificationsLoaded(generation, Ok(BTreeMap::from([(1, false)]))));
-    let _ = app.update(Message::SetClassNotifications(1, false));
-    assert!(app.saving_class_notifications.is_none());
-    assert_eq!(app.class_notifications.as_ref().unwrap().get(&1), Some(&false));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Settings)));
+    let generation = app.settings.notifications_generation;
+    let _ = app.update(Message::Notifications(NotificationsMessage::ClassNotificationsLoaded(generation, Ok(BTreeMap::from([(1, false)])))));
+    let _ = app.update(Message::Notifications(NotificationsMessage::SetClassNotifications(1, false)));
+    assert!(app.settings.saving_class_notifications.is_none());
+    assert_eq!(app.settings.class_notifications.as_ref().unwrap().get(&1), Some(&false));
 
-    app.saving_class_notifications = Some(1);
-    let _ = app.update(Message::ClassNotificationsSaved(1, Ok(true)));
-    assert_eq!(app.class_notifications.as_ref().unwrap().get(&1), Some(&true));
-    let _ = app.update(Message::Navigate(Screen::Home));
-    let _ = app.update(Message::Navigate(Screen::Settings));
-    let _ = app.update(Message::ClassNotificationsLoaded(generation, Ok(BTreeMap::from([(1, false)]))));
-    assert!(app.class_notifications.is_none());
+    app.settings.saving_class_notifications = Some(1);
+    let _ = app.update(Message::Notifications(NotificationsMessage::ClassNotificationsSaved(1, Ok(true))));
+    assert_eq!(app.settings.class_notifications.as_ref().unwrap().get(&1), Some(&true));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Home)));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Settings)));
+    let _ = app.update(Message::Notifications(NotificationsMessage::ClassNotificationsLoaded(generation, Ok(BTreeMap::from([(1, false)])))));
+    assert!(app.settings.class_notifications.is_none());
 }
 
 #[test]
@@ -1077,21 +1077,21 @@ fn archive_and_restore_update_overviews_after_a_matching_confirmation() {
     let (mut app, snapshot) = fixture();
     let count = snapshot.courses.len();
     app.install_snapshot(snapshot);
-    app.todo_class = Some(1);
-    app.calendar_class = Some(1);
-    app.changing_class_archive = Some((1, true));
-    let _ = app.update(Message::ClassArchiveChanged(1, false, Ok(CourseState::Active)));
-    assert_eq!(app.changing_class_archive, Some((1, true)));
-    let _ = app.update(Message::ClassArchiveChanged(1, true, Ok(CourseState::Archived)));
+    app.deadlines.todo_class = Some(1);
+    app.deadlines.calendar_class = Some(1);
+    app.home.changing_class_archive = Some((1, true));
+    let _ = app.update(Message::Courses(CoursesMessage::ClassArchiveChanged(1, false, Ok(CourseState::Active))));
+    assert_eq!(app.home.changing_class_archive, Some((1, true)));
+    let _ = app.update(Message::Courses(CoursesMessage::ClassArchiveChanged(1, true, Ok(CourseState::Archived))));
     let data = app.snapshot.as_ref().unwrap();
     assert_eq!(data.courses.len(), count);
     assert_eq!(data.courses.iter().find(|course| course.id == 1).unwrap().state, CourseState::Archived);
     assert!(data.upcoming_work(&Local::now(), Some(1), 5).is_empty());
     assert!(!app.assignment_courses().contains(&1));
     assert!(app.active_course_options().iter().all(|option| option.id != Some(1)));
-    assert_eq!((app.todo_class, app.calendar_class), (None, None));
-    app.changing_class_archive = Some((1, false));
-    let _ = app.update(Message::ClassArchiveChanged(1, false, Ok(CourseState::Active)));
+    assert_eq!((app.deadlines.todo_class, app.deadlines.calendar_class), (None, None));
+    app.home.changing_class_archive = Some((1, false));
+    let _ = app.update(Message::Courses(CoursesMessage::ClassArchiveChanged(1, false, Ok(CourseState::Active))));
     assert!(app.assignment_courses().contains(&1));
     assert!(app.active_course_options().iter().any(|option| option.id == Some(1)));
 }
@@ -1101,11 +1101,11 @@ fn hidden_class_keeps_enrollment_and_leaves_overviews_until_unhidden() {
     let (mut app, snapshot) = fixture();
     let count = snapshot.courses.len();
     app.install_snapshot(snapshot);
-    app.calendar_class = Some(1);
-    app.todo_class = Some(1);
-    app.changing_course_visibility = Some((1, true));
-    let _ = app.update(Message::CourseVisibilityChanged(2, true, Ok(())));
-    let _ = app.update(Message::CourseVisibilityChanged(1, true, Ok(())));
+    app.deadlines.calendar_class = Some(1);
+    app.deadlines.todo_class = Some(1);
+    app.home.changing_course_visibility = Some((1, true));
+    let _ = app.update(Message::Courses(CoursesMessage::CourseVisibilityChanged(2, true, Ok(()))));
+    let _ = app.update(Message::Courses(CoursesMessage::CourseVisibilityChanged(1, true, Ok(()))));
     let data = app.snapshot.as_ref().unwrap();
     let course = data.courses.iter().find(|course| course.id == 1).unwrap();
     assert!(hidden_course(course));
@@ -1114,10 +1114,10 @@ fn hidden_class_keeps_enrollment_and_leaves_overviews_until_unhidden() {
     assert!(data.upcoming_work(&Local::now(), Some(1), 5).is_empty());
     assert!(!app.assignment_courses().contains(&1));
     assert!(app.active_course_options().iter().all(|option| option.id != Some(1)));
-    assert_eq!((app.calendar_class, app.todo_class), (None, None));
+    assert_eq!((app.deadlines.calendar_class, app.deadlines.todo_class), (None, None));
 
-    app.changing_course_visibility = Some((1, false));
-    let _ = app.update(Message::CourseVisibilityChanged(1, false, Ok(())));
+    app.home.changing_course_visibility = Some((1, false));
+    let _ = app.update(Message::Courses(CoursesMessage::CourseVisibilityChanged(1, false, Ok(()))));
     assert!(app.assignment_courses().contains(&1));
     assert!(app.active_course_options().iter().any(|option| option.id == Some(1)));
 }
@@ -1130,11 +1130,11 @@ fn opening_an_unloaded_item_fetches_classwork_then_comments() {
     items[0].comments = None;
     app.install_snapshot(snapshot.clone());
 
-    let _ = app.update(Message::OpenItem(1, "42".into()));
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenItem(1, "42".into())));
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Coursework(1)));
-    let _ = app.update(Message::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None }))));
+    let _ = app.update(Message::Reads(ReadsMessage::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None })))));
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()), Some(PageRead::StreamAccess(1)));
-    app.loading_stream_access.insert(1);
+    app.stream.loading_stream_access.insert(1);
     assert_eq!(app.next_page_read(app.snapshot.as_ref().unwrap()),
         Some(PageRead::Detail(DetailRead::Comments(1, 42))));
 }
@@ -1152,18 +1152,18 @@ fn your_work_link_requires_matching_identity_and_ignores_cancelled_checks() {
         app.classroom_link_generation
     };
     let generation = begin_check(&mut app);
-    let _ = app.update(Message::ClassroomWorkLinkChecked(generation, target, Ok(wrong)));
+    let _ = app.update(Message::Navigation(NavigationMessage::ClassroomWorkLinkChecked(generation, target, Ok(wrong))));
     assert_eq!(app.screen, Screen::Home);
     assert!(app.classroom_link_input.is_some());
     assert!(app.error.is_some());
 
     let generation = begin_check(&mut app);
-    let _ = app.update(Message::CloseClassroomLink);
-    let _ = app.update(Message::ClassroomWorkLinkChecked(generation, target, Ok(target)));
+    let _ = app.update(Message::Navigation(NavigationMessage::CloseClassroomLink));
+    let _ = app.update(Message::Navigation(NavigationMessage::ClassroomWorkLinkChecked(generation, target, Ok(target))));
     assert_eq!(app.screen, Screen::Home);
 
     let generation = begin_check(&mut app);
-    let _ = app.update(Message::ClassroomWorkLinkChecked(generation, target, Ok(target)));
+    let _ = app.update(Message::Navigation(NavigationMessage::ClassroomWorkLinkChecked(generation, target, Ok(target))));
     assert_eq!(app.screen, Screen::Course(1));
     assert_eq!(app.tab, Tab::YourWork);
     assert!(app.classroom_link_input.is_none());
@@ -1177,13 +1177,13 @@ fn classroom_link_opens_the_item_and_back_returns_to_its_class() {
     app.install_snapshot(snapshot);
     app.screen = Screen::Course(2);
     app.classroom_link_input = Some("https://classroom.google.com/c/MQ/a/NDI/details".into());
-    let _ = app.update(Message::OpenClassroomLink);
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenClassroomLink));
     assert_eq!(app.screen, Screen::Item(1));
     assert_eq!(app.item_id.as_deref(), Some("42"));
-    let _ = app.update(Message::CloseItem);
+    let _ = app.update(Message::Navigation(NavigationMessage::CloseItem));
     assert_eq!((app.screen, app.tab), (Screen::Course(1), Tab::Classwork));
     app.classroom_link_input = Some("https://classroom.google.com/c/999999999".into());
-    let _ = app.update(Message::OpenClassroomLink);
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenClassroomLink));
     assert_eq!(app.screen, Screen::Course(1));
     assert!(app.error.is_some());
 }
@@ -1198,11 +1198,11 @@ fn topic_link_opens_classwork_and_keeps_selection_when_items_load() {
     app.install_snapshot(snapshot);
     app.screen = Screen::Course(2);
     app.classroom_link_input = Some("https://classroom.google.com/u/0/w/MQ/tc/NDU2".into());
-    let _ = app.update(Message::OpenClassroomLink);
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenClassroomLink));
     assert_eq!((app.screen, app.tab), (Screen::Course(1), Tab::Classwork));
-    assert_eq!(app.selected_topic.as_deref(), Some("456"));
-    let _ = app.update(Message::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None }))));
-    assert_eq!(app.selected_topic.as_deref(), Some("456"));
+    assert_eq!(app.classwork.selected_topic.as_deref(), Some("456"));
+    let _ = app.update(Message::Reads(ReadsMessage::CourseworkLoaded(1, Ok(Arc::new(CourseContents { items, topics: None })))));
+    assert_eq!(app.classwork.selected_topic.as_deref(), Some("456"));
     assert_eq!(app.snapshot.as_ref().unwrap().classwork_sections(1, Some("456")).len(), 1);
 }
 
@@ -1216,15 +1216,15 @@ fn material_and_announcement_links_open_matching_items() {
     snapshot.coursework.insert(1, vec![item.clone()]);
     app.install_snapshot(snapshot);
     app.classroom_link_input = Some("https://classroom.google.com/c/MQ/m/NDI/details".into());
-    let _ = app.update(Message::OpenClassroomLink);
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenClassroomLink));
     assert_eq!((app.screen, app.tab), (Screen::Item(1), Tab::Classwork));
     assert_eq!(item_link_kind(&item), Some(ItemLinkKind::Material));
-    let _ = app.update(Message::CloseItem);
+    let _ = app.update(Message::Navigation(NavigationMessage::CloseItem));
 
     item.kind = CourseworkKind::Announcement;
     app.snapshot.as_mut().unwrap().coursework.insert(1, vec![item.clone()]);
     app.classroom_link_input = Some("https://classroom.google.com/c/MQ/p/NDI/details".into());
-    let _ = app.update(Message::OpenClassroomLink);
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenClassroomLink));
     assert_eq!((app.screen, app.tab), (Screen::Item(1), Tab::Stream));
     assert_eq!(item_link_kind(&item), Some(ItemLinkKind::Announcement));
 }
@@ -1271,9 +1271,9 @@ fn mark_done_label_applies_only_to_an_editable_submission_without_attachments() 
 #[test]
 fn failed_submission_update_is_shown_as_an_error() {
     let (mut app, _) = fixture();
-    app.sending_submission = true;
-    let _ = app.update(Message::SubmissionSent(1, Err("Classroom did not update the submission.".into())));
-    assert!(!app.sending_submission);
+    app.student_work.sending_submission = true;
+    let _ = app.update(Message::Submissions(SubmissionsMessage::SubmissionSent(1, Err("Classroom did not update the submission.".into()))));
+    assert!(!app.student_work.sending_submission);
     assert_eq!(app.error.as_deref(), Some("Classroom did not update the submission."));
     assert!(app.notice.is_none());
 }
@@ -1285,14 +1285,14 @@ fn uncertain_comment_result_triggers_one_automatic_read_with_cached_comments() {
     item.id = "42".into();
     item.comments = Some(vec![]);
     app.install_snapshot(snapshot.clone());
-    let _ = app.update(Message::OpenItem(1, "42".into()));
-    let _ = app.update(Message::CommentPosted(1, 42, Err("Connection ended before result".into())));
+    let _ = app.update(Message::Navigation(NavigationMessage::OpenItem(1, "42".into())));
+    let _ = app.update(Message::Comments(CommentsMessage::CommentPosted(1, 42, Err("Connection ended before result".into()))));
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::StreamAccess(1)));
-    app.loading_stream_access.insert(1);
+    app.stream.loading_stream_access.insert(1);
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::Comments(1, 42))));
-    let _ = app.update(Message::DetailLoaded(DetailRead::Comments(1, 42), Err("Read timed out".into())));
+    let _ = app.update(Message::Reads(ReadsMessage::DetailLoaded(DetailRead::Comments(1, 42), Err("Read timed out".into()))));
     assert_ne!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::Comments(1, 42))));
-    assert!(app.comment_unconfirmed.contains(&(1, 42)));
+    assert!(app.comments.comment_unconfirmed.contains(&(1, 42)));
 }
 
 #[test]
@@ -1312,11 +1312,11 @@ fn item_keeps_loading_after_a_section_fails_without_retrying_in_a_loop() {
     assert_eq!(app.next_page_read(&snapshot), Some(comments));
     app.page_errors.insert(comments, "Comments request failed.".into());
     assert_eq!(app.next_page_read(&snapshot), Some(submissions));
-    app.submissions_checked.insert(1);
+    app.student_work.submissions_checked.insert(1);
     assert_eq!(app.next_page_read(&snapshot), Some(PageRead::Detail(DetailRead::Rubric(1, 42))));
-    app.rubrics.insert((1, 42), None);
+    app.student_work.rubrics.insert((1, 42), None);
     assert_eq!(app.next_page_read(&snapshot), Some(feedback));
-    app.private_feedback.insert((1, 42), vec![]);
+    app.comments.private_feedback.insert((1, 42), vec![]);
     assert_eq!(app.next_page_read(&snapshot), None);
 }
 
@@ -1341,16 +1341,16 @@ fn assignment_batch_keeps_completed_classes_when_navigation_cancels_pending_read
         contents: Some(CourseContents { items: data.coursework_for(1).unwrap().to_vec(), topics: None }),
         submissions: Some(vec![]),
     };
-    let _ = app.update(Message::AssignmentLoaded(1, ready));
+    let _ = app.update(Message::Reads(ReadsMessage::AssignmentLoaded(1, ready)));
     assert!(app.snapshot.as_ref().unwrap().coursework_for(1).is_some());
     assert!(app.snapshot.as_ref().unwrap().coursework_for(2).is_none());
     assert!(!app.assignments_loaded);
     assert!(app.assignment_batch.is_some());
 
-    let _ = app.update(Message::Navigate(Screen::Calendar));
-    let _ = app.update(Message::Navigate(Screen::ToDo));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Calendar)));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::ToDo)));
     assert!(!handle.is_aborted());
-    let _ = app.update(Message::Navigate(Screen::Course(2)));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(2))));
     assert!(handle.is_aborted());
     assert!(app.assignment_batch.is_none());
     assert!(!app.queued_page_load);
@@ -1368,14 +1368,14 @@ fn assignment_batch_keeps_completed_classes_when_navigation_cancels_pending_read
         contents: Some(CourseContents { items: vec![], topics: None }),
         submissions: None,
     };
-    let _ = app.update(Message::AssignmentLoaded(1, late));
+    let _ = app.update(Message::Reads(ReadsMessage::AssignmentLoaded(1, late)));
     assert!(app.snapshot.as_ref().unwrap().coursework_for(2).is_none());
     assert!(!app.assignment_courses().contains(&1));
     assert!(app.assignment_courses().contains(&2));
 
-    let _ = app.update(Message::AssignmentLoaded(app.assignment_generation, desktop_auth::AssignmentRefresh {
+    let _ = app.update(Message::Reads(ReadsMessage::AssignmentLoaded(app.assignment_generation, desktop_auth::AssignmentRefresh {
         course_id: 2, contents: None, submissions: None,
-    }));
+    })));
     assert!(app.assignments_loaded);
     assert!(app.assignment_batch.is_none());
     assert!(app.page_errors.contains_key(&PageRead::Assignments));
@@ -1386,12 +1386,12 @@ fn assignment_batch_keeps_completed_classes_when_navigation_cancels_pending_read
 fn page_navigation_remains_queued_during_an_existing_request() {
     let (mut app, _) = fixture();
     app.loading_coursework = Some(2);
-    let _ = app.update(Message::Navigate(Screen::Course(1)));
-    let _ = app.update(Message::SetTab(Tab::People));
+    let _ = app.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(1))));
+    let _ = app.update(Message::Navigation(NavigationMessage::SetTab(Tab::People)));
     assert!(app.queued_page_load);
     assert_eq!((app.screen, app.tab), (Screen::Course(1), Tab::People));
 
-    let _ = app.update(Message::CourseworkLoaded(2, Ok(Arc::new(CourseContents { items: vec![], topics: None }))));
+    let _ = app.update(Message::Reads(ReadsMessage::CourseworkLoaded(2, Ok(Arc::new(CourseContents { items: vec![], topics: None })))));
     assert!(!app.queued_page_load);
 }
 
@@ -1410,4 +1410,19 @@ fn offline_completion_clears_busy_state_and_opens_the_cached_snapshot() {
     assert_eq!(app.screen, Screen::Home);
     assert_eq!(app.snapshot.unwrap().source, SnapshotSource::Cache);
     assert!(app.notice.is_none());
+}
+
+#[test]
+fn live_windows_inherit_system_appearance_and_shared_styles_adapt() {
+    let (mut app, _) = fixture();
+    assert!(app.theme().is_none());
+
+    let dark = Theme::Dark;
+    assert_eq!(themed_text(&dark, FG).color, Some(classroom_palette(&dark).text));
+    assert_ne!(outline_surface(&dark, 8.0).background, Some(WHITE.into()));
+    assert_eq!(outline_surface(&Theme::Light, 8.0).background, Some(WHITE.into()));
+
+    app.screenshot_directory = Some(PathBuf::from("demo"));
+    app.dark_fixture = true;
+    assert!(app.theme().unwrap().extended_palette().is_dark);
 }

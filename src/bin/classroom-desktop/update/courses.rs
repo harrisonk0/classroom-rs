@@ -1,110 +1,146 @@
 use super::*;
 
+#[derive(Clone)]
+pub(in crate::desktop) enum CoursesMessage {
+    ToggleHiddenClasses,
+    ToggleCourseMenu(i64),
+    ChooseCourseMove(i64),
+    MoveCourse(i64, CoursePlacement),
+    CourseMoved(i64, Result<Vec<Course>, String>),
+    BeginCourseDrag(i64),
+    EnterCourseDropTarget(i64),
+    ExitCourseDropTarget(i64),
+    DropCourse,
+    CancelCourseDrag,
+    ConfirmHideCourse(i64),
+    ChangeCourseVisibility(i64, bool),
+    CourseVisibilityChanged(i64, bool, Result<(), String>),
+    ConfirmClassArchive(i64),
+    ChangeClassArchive(i64, bool),
+    ClassArchiveChanged(i64, bool, Result<CourseState, String>),
+    EditClassCode(String),
+    JoinClass,
+    LoadInvitations,
+    InvitationsLoaded(u64, Result<Vec<Course>, String>),
+    AcceptInvitation(i64),
+    ConfirmDeclineInvitation(i64),
+    CancelDeclineInvitation,
+    DeclineInvitation(i64),
+    InvitationDeclined(Result<Vec<Course>, String>),
+    ConfirmUnenroll(i64),
+    CancelUnenroll,
+    Unenroll(i64),
+    MembershipFinished(Result<MembershipChange, String>),
+    ClassCreationPermission(u64, Result<bool, String>),
+    EditNewClass(NewClassField, String),
+    CreateClass,
+}
+
 impl App {
-    pub(super) fn update_courses(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_courses(&mut self, message: CoursesMessage) -> Task<Message> {
         match message {
-            Message::ToggleHiddenClasses if self.screen == Screen::Home => {
-                self.show_hidden_classes = !self.show_hidden_classes;
-                self.open_course_menu = None;
-                self.move_course_menu = None;
-                self.confirm_hide_course = None;
+            CoursesMessage::ToggleHiddenClasses if self.screen == Screen::Home => {
+                self.home.show_hidden_classes = !self.home.show_hidden_classes;
+                self.home.open_course_menu = None;
+                self.home.move_course_menu = None;
+                self.home.confirm_hide_course = None;
             }
-            Message::ToggleCourseMenu(id) if matches!(self.screen, Screen::Home | Screen::Archived) => {
-                self.open_course_menu = (self.open_course_menu != Some(id)).then_some(id);
-                self.move_course_menu = None;
-                self.confirm_hide_course = None;
-                self.confirm_class_archive = None;
+            CoursesMessage::ToggleCourseMenu(id) if matches!(self.screen, Screen::Home | Screen::Archived) => {
+                self.home.open_course_menu = (self.home.open_course_menu != Some(id)).then_some(id);
+                self.home.move_course_menu = None;
+                self.home.confirm_hide_course = None;
+                self.home.confirm_class_archive = None;
             }
-            Message::ChooseCourseMove(id) if self.open_course_menu == Some(id) && self.can_move_course(id) => {
-                self.move_course_menu = Some(id);
-                self.confirm_hide_course = None;
+            CoursesMessage::ChooseCourseMove(id) if self.home.open_course_menu == Some(id) && self.can_move_course(id) => {
+                self.home.move_course_menu = Some(id);
+                self.home.confirm_hide_course = None;
             }
-            Message::MoveCourse(id, placement) if self.can_move_course(id) && !self.has_pending_request() => {
+            CoursesMessage::MoveCourse(id, placement) if self.can_move_course(id) && !self.has_pending_request() => {
                 let Some(session) = self.session.clone() else { return Task::none() };
-                self.open_course_menu = None;
-                self.move_course_menu = None;
-                self.course_drag = None;
-                self.moving_course = Some(id);
+                self.home.open_course_menu = None;
+                self.home.move_course_menu = None;
+                self.home.course_drag = None;
+                self.home.moving_course = Some(id);
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move { desktop_auth::reorder_class(&session, id, placement).await },
-                    move |result| Message::CourseMoved(id, result));
+                    move |result| Message::Courses(CoursesMessage::CourseMoved(id, result)));
             }
-            Message::CourseMoved(id, result) if self.moving_course == Some(id) => {
-                self.moving_course = None;
+            CoursesMessage::CourseMoved(id, result) if self.home.moving_course == Some(id) => {
+                self.home.moving_course = None;
                 match result {
                     Ok(courses) => {
                         if let Some(snapshot) = &mut self.snapshot {
                             snapshot.courses = courses;
                         }
-                        self.alphabetical = false;
+                        self.home.alphabetical = false;
                         self.notice = Some("Class order saved.".into());
                     }
                     Err(error) => {
-                        let refresh = self.update(Message::Refresh);
+                        let refresh = self.update(Message::Session(SessionMessage::Refresh));
                         self.error = Some(error);
                         return refresh;
                     }
                 }
             }
-            Message::BeginCourseDrag(id) if self.can_move_course(id) && !self.alphabetical
-                && self.search.trim().is_empty() && !self.has_pending_request() =>
+            CoursesMessage::BeginCourseDrag(id) if self.can_move_course(id) && !self.home.alphabetical
+                && self.home.search.trim().is_empty() && !self.has_pending_request() =>
             {
-                self.open_course_menu = None;
-                self.move_course_menu = None;
-                self.confirm_hide_course = None;
-                self.course_drag = Some(CourseDrag { source: id, target: None });
+                self.home.open_course_menu = None;
+                self.home.move_course_menu = None;
+                self.home.confirm_hide_course = None;
+                self.home.course_drag = Some(CourseDrag { source: id, target: None });
             }
-            Message::EnterCourseDropTarget(id) => {
-                if let Some(drag) = &mut self.course_drag {
+            CoursesMessage::EnterCourseDropTarget(id) => {
+                if let Some(drag) = &mut self.home.course_drag {
                     drag.target = (id != drag.source).then_some(id);
                 }
             }
-            Message::ExitCourseDropTarget(id) => {
-                if let Some(drag) = &mut self.course_drag
+            CoursesMessage::ExitCourseDropTarget(id) => {
+                if let Some(drag) = &mut self.home.course_drag
                     && drag.target == Some(id)
                 {
                     drag.target = None;
                 }
             }
-            Message::CancelCourseDrag => self.course_drag = None,
-            Message::DropCourse => {
-                if let Some(CourseDrag { source, target: Some(target) }) = self.course_drag.take()
+            CoursesMessage::CancelCourseDrag => self.home.course_drag = None,
+            CoursesMessage::DropCourse => {
+                if let Some(CourseDrag { source, target: Some(target) }) = self.home.course_drag.take()
                     && let Some(placement) = self.drop_placement(source, target)
                 {
-                    return self.update(Message::MoveCourse(source, placement));
+                    return self.update(Message::Courses(CoursesMessage::MoveCourse(source, placement)));
                 }
             }
-            Message::ConfirmHideCourse(id) if self.open_course_menu == Some(id)
+            CoursesMessage::ConfirmHideCourse(id) if self.home.open_course_menu == Some(id)
                 && self.can_change_course_visibility(id, true) =>
             {
-                self.confirm_hide_course = Some(id);
+                self.home.confirm_hide_course = Some(id);
             }
-            Message::ChangeCourseVisibility(id, hidden) if self.open_course_menu == Some(id)
-                && (!hidden || self.confirm_hide_course == Some(id))
+            CoursesMessage::ChangeCourseVisibility(id, hidden) if self.home.open_course_menu == Some(id)
+                && (!hidden || self.home.confirm_hide_course == Some(id))
                 && self.can_change_course_visibility(id, hidden) && !self.has_pending_request() =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
-                self.open_course_menu = None;
-                self.confirm_hide_course = None;
-                self.changing_course_visibility = Some((id, hidden));
+                self.home.open_course_menu = None;
+                self.home.confirm_hide_course = None;
+                self.home.changing_course_visibility = Some((id, hidden));
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move { desktop_auth::set_class_hidden(&session, id, hidden).await },
-                    move |result| Message::CourseVisibilityChanged(id, hidden, result));
+                    move |result| Message::Courses(CoursesMessage::CourseVisibilityChanged(id, hidden, result)));
             }
-            Message::CourseVisibilityChanged(id, hidden, result) if self.changing_course_visibility == Some((id, hidden)) => {
-                self.changing_course_visibility = None;
+            CoursesMessage::CourseVisibilityChanged(id, hidden, result) if self.home.changing_course_visibility == Some((id, hidden)) => {
+                self.home.changing_course_visibility = None;
                 match result {
                     Ok(()) => {
                         if let Some(course) = self.snapshot.as_mut().and_then(|snapshot| snapshot.courses.iter_mut().find(|course| course.id == id)) {
                             course.hidden = Some(hidden);
                         }
-                        if self.todo_class == Some(id) {
-                            self.todo_class = None;
+                        if self.deadlines.todo_class == Some(id) {
+                            self.deadlines.todo_class = None;
                         }
-                        if self.calendar_class == Some(id) {
-                            self.calendar_class = None;
+                        if self.deadlines.calendar_class == Some(id) {
+                            self.deadlines.calendar_class = None;
                         }
                         self.cancel_assignment_batch();
                         self.assignments_completed.remove(&id);
@@ -115,32 +151,32 @@ impl App {
                         self.notice = Some(if hidden { "Class hidden." } else { "Class unhidden." }.into());
                     }
                     Err(error) => {
-                        let refresh = self.update(Message::Refresh);
+                        let refresh = self.update(Message::Session(SessionMessage::Refresh));
                         self.error = Some(error);
                         return refresh;
                     }
                 }
             }
-            Message::ConfirmClassArchive(id) if self.open_course_menu == Some(id)
+            CoursesMessage::ConfirmClassArchive(id) if self.home.open_course_menu == Some(id)
                 && self.can_change_class_archive(id, self.screen == Screen::Home) =>
             {
-                self.confirm_class_archive = Some(id);
+                self.home.confirm_class_archive = Some(id);
             }
-            Message::ChangeClassArchive(id, archive) if self.open_course_menu == Some(id)
-                && self.confirm_class_archive == Some(id)
+            CoursesMessage::ChangeClassArchive(id, archive) if self.home.open_course_menu == Some(id)
+                && self.home.confirm_class_archive == Some(id)
                 && self.can_change_class_archive(id, archive) && !self.has_pending_request() =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
-                self.open_course_menu = None;
-                self.confirm_class_archive = None;
-                self.changing_class_archive = Some((id, archive));
+                self.home.open_course_menu = None;
+                self.home.confirm_class_archive = None;
+                self.home.changing_class_archive = Some((id, archive));
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move { desktop_auth::set_class_archived(&session, id, archive).await },
-                    move |result| Message::ClassArchiveChanged(id, archive, result));
+                    move |result| Message::Courses(CoursesMessage::ClassArchiveChanged(id, archive, result)));
             }
-            Message::ClassArchiveChanged(id, archive, result) if self.changing_class_archive == Some((id, archive)) => {
-                self.changing_class_archive = None;
+            CoursesMessage::ClassArchiveChanged(id, archive, result) if self.home.changing_class_archive == Some((id, archive)) => {
+                self.home.changing_class_archive = None;
                 match result {
                     Ok(state) => {
                         let session_snapshot = self.session.as_mut().map(|session| &mut Arc::make_mut(session).snapshot);
@@ -149,7 +185,7 @@ impl App {
                                 course.state = state;
                             }
                         }
-                        for filter in [&mut self.calendar_class, &mut self.todo_class] {
+                        for filter in [&mut self.deadlines.calendar_class, &mut self.deadlines.todo_class] {
                             if *filter == Some(id) {
                                 *filter = None;
                             }
@@ -161,13 +197,13 @@ impl App {
                         self.notice = Some(if archive { "Class archived." } else { "Class restored." }.into());
                     }
                     Err(error) => {
-                        let refresh = self.update(Message::Refresh);
+                        let refresh = self.update(Message::Session(SessionMessage::Refresh));
                         self.error = Some(error);
                         return refresh;
                     }
                 }
             }
-            Message::LoadInvitations
+            CoursesMessage::LoadInvitations
                 if self.can_change_membership() && !self.loading_invitations && !self.changing_membership =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
@@ -175,9 +211,9 @@ impl App {
                 self.page_errors.remove(&PageRead::Invitations);
                 let generation = self.invitation_generation;
                 return Task::perform(async move { desktop_auth::load_invitations(&session).await },
-                    move |result| Message::InvitationsLoaded(generation, result));
+                    move |result| Message::Courses(CoursesMessage::InvitationsLoaded(generation, result)));
             }
-            Message::InvitationsLoaded(generation, result) if generation == self.invitation_generation => {
+            CoursesMessage::InvitationsLoaded(generation, result) if generation == self.invitation_generation => {
                 self.loading_invitations = false;
                 self.queued_page_load |= self.screen == Screen::Home;
                 match result {
@@ -193,20 +229,20 @@ impl App {
                     }
                 }
             }
-            Message::AcceptInvitation(course) if self.can_respond_to_invitation(course) => {
+            CoursesMessage::AcceptInvitation(course) if self.can_respond_to_invitation(course) => {
                 let Some(session) = self.session.clone() else { return Task::none() };
                 self.confirming_decline = None;
                 self.changing_membership = true;
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move { desktop_auth::accept_invitation(&session, course).await },
-                    move |result| Message::MembershipFinished(result.map(|()| MembershipChange::Joined(course))));
+                    move |result| Message::Courses(CoursesMessage::MembershipFinished(result.map(|()| MembershipChange::Joined(course)))));
             }
-            Message::ConfirmDeclineInvitation(course) if self.can_respond_to_invitation(course) => {
+            CoursesMessage::ConfirmDeclineInvitation(course) if self.can_respond_to_invitation(course) => {
                 self.confirming_decline = Some(course);
             }
-            Message::CancelDeclineInvitation => self.confirming_decline = None,
-            Message::DeclineInvitation(course)
+            CoursesMessage::CancelDeclineInvitation => self.confirming_decline = None,
+            CoursesMessage::DeclineInvitation(course)
                 if self.confirming_decline == Some(course) && self.can_respond_to_invitation(course) =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
@@ -215,9 +251,9 @@ impl App {
                 self.error = None;
                 self.notice = None;
                 return Task::perform(async move { desktop_auth::decline_invitation(&session, course).await },
-                    Message::InvitationDeclined);
+                    |value| Message::Courses(CoursesMessage::InvitationDeclined(value)));
             }
-            Message::InvitationDeclined(result) => {
+            CoursesMessage::InvitationDeclined(result) => {
                 self.changing_membership = false;
                 match result {
                     Ok(remaining) => {
@@ -228,7 +264,7 @@ impl App {
                     }
                     Err(error) => {
                         self.error = Some(error);
-                        let invitations = self.update(Message::LoadInvitations);
+                        let invitations = self.update(Message::Courses(CoursesMessage::LoadInvitations));
                         return Task::batch([
                             invitations,
                             self.dequeue_page_load().map_or_else(Task::none, |read| self.update(read)),
@@ -236,13 +272,13 @@ impl App {
                     }
                 }
             }
-            Message::EditClassCode(code) if self.screen == Screen::Join && !self.changing_membership => {
+            CoursesMessage::EditClassCode(code) if self.screen == Screen::Join && !self.changing_membership => {
                 self.class_code = code;
             }
-            Message::ClassCreationPermission(generation, result) if generation == self.class_creation_generation => {
+            CoursesMessage::ClassCreationPermission(generation, result) if generation == self.class_creation_generation => {
                 self.class_creation_allowed = result.unwrap_or(false);
             }
-            Message::EditNewClass(field, value) if self.screen == Screen::CreateClass && !self.changing_membership => {
+            CoursesMessage::EditNewClass(field, value) if self.screen == Screen::CreateClass && !self.changing_membership => {
                 let input = match field {
                     NewClassField::Name => &mut self.new_class.name,
                     NewClassField::Section => &mut self.new_class.section,
@@ -251,7 +287,7 @@ impl App {
                 };
                 *input = value;
             }
-            Message::CreateClass if self.screen == Screen::CreateClass && self.can_create_class()
+            CoursesMessage::CreateClass if self.screen == Screen::CreateClass && self.can_create_class()
                 && !self.has_pending_request() && desktop_auth::class_input_valid(&self.new_class) =>
             {
                 let Some(session) = self.session.clone() else { return Task::none() };
@@ -260,9 +296,9 @@ impl App {
                 self.notice = None;
                 self.changing_membership = true;
                 return Task::perform(async move { desktop_auth::create_class(&session, input).await },
-                    |result| Message::MembershipFinished(result.map(MembershipChange::Created)));
+                    |result| Message::Courses(CoursesMessage::MembershipFinished(result.map(MembershipChange::Created))));
             }
-            Message::JoinClass
+            CoursesMessage::JoinClass
                 if self.screen == Screen::Join && self.can_change_membership()
                     && !self.has_pending_request() && desktop_auth::valid_class_code(&self.class_code) =>
             {
@@ -272,13 +308,13 @@ impl App {
                 self.notice = None;
                 self.changing_membership = true;
                 return Task::perform(async move { desktop_auth::join_class(&session, code).await },
-                    |result| Message::MembershipFinished(result.map(MembershipChange::Joined)));
+                    |result| Message::Courses(CoursesMessage::MembershipFinished(result.map(MembershipChange::Joined))));
             }
-            Message::ConfirmUnenroll(course) if self.screen == Screen::Course(course) && self.can_change_membership() => {
+            CoursesMessage::ConfirmUnenroll(course) if self.screen == Screen::Course(course) && self.can_change_membership() => {
                 self.confirming_unenroll = Some(course);
             }
-            Message::CancelUnenroll => self.confirming_unenroll = None,
-            Message::Unenroll(course)
+            CoursesMessage::CancelUnenroll => self.confirming_unenroll = None,
+            CoursesMessage::Unenroll(course)
                 if self.screen == Screen::Course(course) && self.confirming_unenroll == Some(course)
                     && self.can_change_membership() && !self.has_pending_request() =>
             {
@@ -288,9 +324,9 @@ impl App {
                 self.notice = None;
                 self.changing_membership = true;
                 return Task::perform(async move { desktop_auth::leave_class(&session, course).await },
-                    move |result| Message::MembershipFinished(result.map(|()| MembershipChange::Left(course))));
+                    move |result| Message::Courses(CoursesMessage::MembershipFinished(result.map(|()| MembershipChange::Left(course)))));
             }
-            Message::MembershipFinished(result) => {
+            CoursesMessage::MembershipFinished(result) => {
                 self.changing_membership = false;
                 match result {
                     Ok(change) => {
@@ -316,17 +352,17 @@ impl App {
                                     snapshot.coursework.remove(&id);
                                     snapshot.topics.remove(&id);
                                     snapshot.roster.remove(&id);
-                                    self.submissions_checked.remove(&id);
+                                    self.student_work.submissions_checked.remove(&id);
                                 }
                                 "Unenrolled from class."
                             }
                         };
-                        let refresh = self.update(Message::Refresh);
+                        let refresh = self.update(Message::Session(SessionMessage::Refresh));
                         self.notice = Some(message.into());
                         return refresh;
                     }
                     Err(error) => {
-                        let invitations = self.update(Message::LoadInvitations);
+                        let invitations = self.update(Message::Courses(CoursesMessage::LoadInvitations));
                         self.error = Some(error);
                         return invitations;
                     }

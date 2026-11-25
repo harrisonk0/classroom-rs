@@ -17,7 +17,7 @@ impl App {
     pub(super) fn personal_copy_candidate(&self, course: i64, item: i64) -> Option<String> {
         if !self.can_compose_comment(course, item)
             || self.class_roles.get(&course) != Some(&CourseRole::Student)
-            || !self.submissions_checked.contains(&course)
+            || !self.student_work.submissions_checked.contains(&course)
             || self.page_errors.contains_key(&PageRead::Detail(DetailRead::Submissions(course)))
         {
             return None;
@@ -28,13 +28,13 @@ impl App {
     }
 
     pub(super) fn personal_copy_ready(&self, course: i64, item: i64, reference: &str) -> bool {
-        self.personal_copy_checks.get(&(course, item)).is_some_and(|(checked, absent)| *absent && checked == reference)
+        self.attachments.personal_copy_checks.get(&(course, item)).is_some_and(|(checked, absent)| *absent && checked == reference)
             && self.personal_copy_candidate(course, item).as_deref() == Some(reference)
     }
 
     pub(super) fn can_compose_class_comment(&self, course: i64, item: i64) -> bool {
         self.can_compose_comment(course, item)
-            && self.stream_access.get(&course).is_some_and(|access| access.can_comment())
+            && self.stream.stream_access.get(&course).is_some_and(|access| access.can_comment())
     }
 
     pub(super) fn may_delete_comment(&self, target: CommentTarget) -> bool {
@@ -44,7 +44,7 @@ impl App {
 
     pub(super) fn displayed_comment(&self, target: CommentTarget) -> Option<&Comment> {
         let comments = match target.audience {
-            CommentAudience::Private => self.private_feedback.get(&(target.course, target.item)),
+            CommentAudience::Private => self.comments.private_feedback.get(&(target.course, target.item)),
             CommentAudience::Class => self.snapshot.as_ref().and_then(|snapshot| snapshot.coursework_for(target.course))
                 .and_then(|items| items.iter().find(|item| item.id.parse::<i64>().ok() == Some(target.item)))
                 .and_then(|item| item.comments.as_ref()),
@@ -61,7 +61,7 @@ impl App {
     }
 
     pub(super) fn owns_comment(&self, comment: &Comment) -> bool {
-        self.stream_viewer_id.is_some() && self.stream_viewer_id == comment.author_id
+        self.stream.stream_viewer_id.is_some() && self.stream.stream_viewer_id == comment.author_id
     }
 
     pub(super) fn current_question(&self, course: i64, item: i64) -> Option<&Coursework> {
@@ -76,7 +76,7 @@ impl App {
 
     pub(super) fn editable_question(&self, course: i64, item: i64) -> Option<&QuestionDetails> {
         let work = self.current_question(course, item)?;
-        let revision = self.short_answer_revisions.get(&(course, item));
+        let revision = self.student_work.short_answer_revisions.get(&(course, item));
         if desktop_auth::question_submission_is_current(work, revision) {
             work.question.as_ref()
         } else {
@@ -87,13 +87,13 @@ impl App {
     pub(super) fn question_draft(&self, key: (i64, i64), details: &QuestionDetails) -> Option<QuestionAnswer> {
         let draft = match details {
             QuestionDetails::ShortAnswer => {
-                let text = self.short_answer_drafts.get(&key)?.text();
-                if self.short_answer_revisions.get(&key).is_some_and(|revision| revision.answer == text) {
+                let text = self.student_work.short_answer_drafts.get(&key)?.text();
+                if self.student_work.short_answer_revisions.get(&key).is_some_and(|revision| revision.answer == text) {
                     return None;
                 }
                 QuestionAnswer::ShortAnswer(text)
             }
-            QuestionDetails::MultipleChoice(_) => QuestionAnswer::MultipleChoice(self.choice_drafts.get(&key)?.clone()),
+            QuestionDetails::MultipleChoice(_) => QuestionAnswer::MultipleChoice(self.student_work.choice_drafts.get(&key)?.clone()),
         };
         details.accepts(&draft).then_some(draft)
     }

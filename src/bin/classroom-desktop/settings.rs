@@ -3,12 +3,12 @@ use iced::widget::column;
 
 impl App {
     pub(super) fn reset_notifications(&mut self) {
-        self.notifications_generation = self.notifications_generation.wrapping_add(1);
-        self.class_notifications = None;
-        self.loading_class_notifications = false;
+        self.settings.notifications_generation = self.settings.notifications_generation.wrapping_add(1);
+        self.settings.class_notifications = None;
+        self.settings.loading_class_notifications = false;
         self.page_errors.remove(&PageRead::ClassNotifications);
-        self.email_notifications = None;
-        self.loading_email_notifications = false;
+        self.settings.email_notifications = None;
+        self.settings.loading_email_notifications = false;
         self.page_errors.remove(&PageRead::EmailNotifications);
     }
 
@@ -19,16 +19,16 @@ impl App {
 
     pub(super) fn can_set_class_notifications(&self, id: i64, enabled: bool) -> bool {
         self.screen == Screen::Settings && self.can_read_pages() && !self.has_pending_request()
-            && !self.loading_class_notifications
-            && self.email_notifications.as_ref().and_then(|settings| settings.enabled) != Some(false)
+            && !self.settings.loading_class_notifications
+            && self.settings.email_notifications.as_ref().and_then(|settings| settings.enabled) != Some(false)
             && self.class_notification_courses().any(|course| course.id == id)
-            && self.class_notifications.as_ref().and_then(|map| map.get(&id)) == Some(&enabled)
+            && self.settings.class_notifications.as_ref().and_then(|map| map.get(&id)) == Some(&enabled)
     }
 
     pub(super) fn can_set_email_notification(&self, target: EmailNotificationTarget, enabled: bool) -> bool {
         self.screen == Screen::Settings && self.can_read_pages() && !self.has_pending_request()
-            && !self.loading_email_notifications
-            && self.email_notifications.as_ref().is_some_and(|settings| {
+            && !self.settings.loading_email_notifications
+            && self.settings.email_notifications.as_ref().is_some_and(|settings| {
                 (target == EmailNotificationTarget::AllEmail || settings.enabled == Some(true))
                     && settings.value(target) == Some(!enabled)
             })
@@ -40,24 +40,24 @@ impl App {
         let control = match enabled {
             Some(enabled) => {
                 let ready = self.can_set_email_notification(target, !enabled) || self.screenshot_directory.is_some();
-                let saving = self.saving_email_notification == Some(target);
-                notification_switch(enabled, saving, ready, move |value| Message::SetEmailNotification(target, value))
+                let saving = self.settings.saving_email_notification == Some(target);
+                notification_switch(enabled, saving, ready, move |value| Message::Notifications(NotificationsMessage::SetEmailNotification(target, value)))
             }
-            None => text("Unavailable").size(14).color(MUTED).into(),
+            None => text("Unavailable").size(14).style(move |theme| themed_text(theme, MUTED)).into(),
         };
-        row![text(label.to_owned()).size(15).color(FG).width(Fill), control]
+        row![text(label.to_owned()).size(15).style(move |theme| themed_text(theme, FG)).width(Fill), control]
             .spacing(12).align_y(Alignment::Center).into()
     }
 
     fn email_notification_panel(&self) -> Element<'_, Message> {
-        let mut panel = column![text("Email notifications").size(20).font(medium()).color(FG)]
+        let mut panel = column![text("Email notifications").size(20).font(medium()).style(move |theme| themed_text(theme, FG))]
             .spacing(10).width(Fill);
         if let Some(status) = self.page_read_status(
-            PageRead::EmailNotifications, self.email_notifications.is_some(), "Loading email notifications…",
+            PageRead::EmailNotifications, self.settings.email_notifications.is_some(), "Loading email notifications…",
         ) {
             panel = panel.push(status);
         }
-        if let Some(settings) = &self.email_notifications {
+        if let Some(settings) = &self.settings.email_notifications {
             panel = panel.push(self.email_notification_row(
                 "Allow email notifications", EmailNotificationTarget::AllEmail, settings.enabled,
             ));
@@ -65,7 +65,7 @@ impl App {
                 for category in &settings.categories {
                     panel = panel.push(rule::horizontal(1).style(divider_style));
                     if let Some(label) = &category.label {
-                        panel = panel.push(text(label).size(14).font(medium()).color(MUTED));
+                        panel = panel.push(text(label).size(14).font(medium()).style(move |theme| themed_text(theme, MUTED)));
                     }
                     for group in &category.groups {
                         panel = panel.push(self.email_notification_row(
@@ -75,28 +75,28 @@ impl App {
                 }
             }
         } else if !self.can_read_pages() {
-            panel = panel.push(text("Sign in to manage email notifications.").size(14).color(MUTED));
+            panel = panel.push(text("Sign in to manage email notifications.").size(14).style(move |theme| themed_text(theme, MUTED)));
         }
-        container(panel).padding(22).width(Fill).style(|_| outline_surface(12.0)).into()
+        container(panel).padding(22).width(Fill).style(|theme| outline_surface(theme, 12.0)).into()
     }
 
     pub(super) fn settings(&self) -> Element<'_, Message> {
         let mut section = column![
-            text("Class notifications").size(20).font(medium()).color(FG),
-            text("Choose which classes can send you notifications.").size(14).color(MUTED),
+            text("Class notifications").size(20).font(medium()).style(move |theme| themed_text(theme, FG)),
+            text("Choose which classes can send you notifications.").size(14).style(move |theme| themed_text(theme, MUTED)),
         ].spacing(10).width(Fill);
         if let Some(status) = self.page_read_status(
-            PageRead::ClassNotifications, self.class_notifications.is_some(), "Loading class notifications…",
+            PageRead::ClassNotifications, self.settings.class_notifications.is_some(), "Loading class notifications…",
         ) {
             section = section.push(status);
         }
-        if let Some(settings) = &self.class_notifications {
-            if self.email_notifications.as_ref().and_then(|settings| settings.enabled) == Some(false) {
-                section = section.push(text("Turn on email notifications to change these settings.").size(14).color(MUTED));
+        if let Some(settings) = &self.settings.class_notifications {
+            if self.settings.email_notifications.as_ref().and_then(|settings| settings.enabled) == Some(false) {
+                section = section.push(text("Turn on email notifications to change these settings.").size(14).style(move |theme| themed_text(theme, MUTED)));
             }
             let mut courses = self.class_notification_courses().peekable();
             if courses.peek().is_none() {
-                section = section.push(text("No active classes.").size(14).color(MUTED));
+                section = section.push(text("No active classes.").size(14).style(move |theme| themed_text(theme, MUTED)));
             }
             for course in courses {
                 let id = course.id;
@@ -104,27 +104,27 @@ impl App {
                     Some(muted) => {
                         let enabled = !muted;
                         let ready = self.can_set_class_notifications(id, !enabled) || self.screenshot_directory.is_some();
-                        notification_switch(enabled, self.saving_class_notifications == Some(id), ready,
-                            move |value| Message::SetClassNotifications(id, value))
+                        notification_switch(enabled, self.settings.saving_class_notifications == Some(id), ready,
+                            move |value| Message::Notifications(NotificationsMessage::SetClassNotifications(id, value)))
                     }
-                    None => text("Unavailable").size(14).color(MUTED).into(),
+                    None => text("Unavailable").size(14).style(move |theme| themed_text(theme, MUTED)).into(),
                 };
                 section = section.push(rule::horizontal(1).style(divider_style)).push(row![
                     avatar(first_initial(&course.title), course_color(course), 28.0, 12.0),
                     column![
-                        text(&course.title).size(15).color(FG),
-                        text(&course.subtitle).size(13).color(MUTED),
+                        text(&course.title).size(15).style(move |theme| themed_text(theme, FG)),
+                        text(&course.subtitle).size(13).style(move |theme| themed_text(theme, MUTED)),
                     ].spacing(3).width(Fill),
                     control,
                 ].spacing(12).align_y(Alignment::Center));
             }
         } else if !self.can_read_pages() {
-            section = section.push(text("Sign in to manage class notifications.").size(14).color(MUTED));
+            section = section.push(text("Sign in to manage class notifications.").size(14).style(move |theme| themed_text(theme, MUTED)));
         }
         let body = column![
-            text("Settings").size(27).color(FG),
+            text("Settings").size(27).style(move |theme| themed_text(theme, FG)),
             self.email_notification_panel(),
-            container(section).padding(22).width(Fill).style(|_| outline_surface(12.0)),
+            container(section).padding(22).width(Fill).style(|theme| outline_surface(theme, 12.0)),
         ].spacing(18).max_width(780);
         scrollable(container(body).center_x(Fill).padding(25)).height(Fill).into()
     }
@@ -136,4 +136,15 @@ pub(super) fn notification_switch(
     let status = if saving { "Saving…" } else if enabled { "On" } else { "Off" };
     toggler(enabled).label(status).size(19).text_size(14).width(112)
         .on_toggle_maybe(ready.then_some(change)).into()
+}
+
+#[derive(Default)]
+pub(super) struct SettingsState {
+    pub(super) class_notifications: Option<BTreeMap<i64, bool>>,
+    pub(super) loading_class_notifications: bool,
+    pub(super) notifications_generation: u64,
+    pub(super) saving_class_notifications: Option<i64>,
+    pub(super) email_notifications: Option<EmailNotificationSettings>,
+    pub(super) loading_email_notifications: bool,
+    pub(super) saving_email_notification: Option<EmailNotificationTarget>,
 }

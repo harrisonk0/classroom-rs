@@ -17,10 +17,10 @@ impl App {
         }
 
         if let Some(mut contents) = result.contents {
-            self.personal_copy_generation = self.personal_copy_generation.wrapping_add(1);
-            self.personal_copy_checks.retain(|(course, _), _| *course != id);
-            if self.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
-                self.pending_personal_copy = None;
+            self.attachments.personal_copy_generation = self.attachments.personal_copy_generation.wrapping_add(1);
+            self.attachments.personal_copy_checks.retain(|(course, _), _| *course != id);
+            if self.attachments.pending_personal_copy.as_ref().is_some_and(|(course, _, _)| *course == id) {
+                self.attachments.pending_personal_copy = None;
             }
             if let Some(previous) = snapshot.coursework_for(id) {
                 for item in &mut contents.items {
@@ -39,7 +39,7 @@ impl App {
             snapshot.coursework.insert(id, contents.items);
             if let Some(submissions) = result.submissions {
                 snapshot.set_submissions(id, submissions);
-                self.submissions_checked.insert(id);
+                self.student_work.submissions_checked.insert(id);
                 self.assignments_completed.insert(id);
             } else if needs_status {
                 batch.failed_status += 1;
@@ -132,10 +132,10 @@ impl App {
 
     pub(super) fn next_page_read(&self, snapshot: &Snapshot) -> Option<PageRead> {
         let read = match self.screen {
-            Screen::Settings if self.class_notifications.is_none() && !self.loading_class_notifications
+            Screen::Settings if self.settings.class_notifications.is_none() && !self.settings.loading_class_notifications
                 && !self.page_errors.contains_key(&PageRead::ClassNotifications) =>
                 PageRead::ClassNotifications,
-            Screen::Settings if self.email_notifications.is_none() && !self.loading_email_notifications =>
+            Screen::Settings if self.settings.email_notifications.is_none() && !self.settings.loading_email_notifications =>
                 PageRead::EmailNotifications,
             Screen::Home | Screen::Join if self.invitations.is_none() && !self.loading_invitations
                 && !self.page_errors.contains_key(&PageRead::Invitations) => PageRead::Invitations,
@@ -147,7 +147,7 @@ impl App {
             }
             Screen::Course(course) if self.tab == Tab::People && self.class_roles.get(&course) == Some(&CourseRole::Teacher)
                 && snapshot.courses.iter().any(|entry| entry.id == course && entry.state == CourseState::Active)
-                && !self.student_muting.contains_key(&course) =>
+                && !self.people.student_muting.contains_key(&course) =>
             {
                 PageRead::Detail(DetailRead::StudentMuting(course))
             }
@@ -167,20 +167,20 @@ impl App {
                 let teacher = self.class_roles.get(&course) == Some(&CourseRole::Teacher);
                 [
                     (items.is_none(), coursework),
-                    (teacher && self.tab == Tab::Classwork && !self.teacher_topics.contains_key(&course)
+                    (teacher && self.tab == Tab::Classwork && !self.classwork.teacher_topics.contains_key(&course)
                         && snapshot.courses.iter().any(|entry| entry.id == course && entry.state == CourseState::Active),
                         PageRead::Detail(DetailRead::TeacherTopics(course))),
                     (self.tab == Tab::Stream && snapshot.courses.iter().any(|entry| entry.id == course && entry.state == CourseState::Active)
-                        && !self.stream_access.contains_key(&course) && !self.loading_stream_access.contains(&course), PageRead::StreamAccess(course)),
-                    (teacher && matches!(self.tab, Tab::Classwork | Tab::Stream) && !self.teacher_drafts.contains_key(&course),
+                        && !self.stream.stream_access.contains_key(&course) && !self.stream.loading_stream_access.contains(&course), PageRead::StreamAccess(course)),
+                    (teacher && matches!(self.tab, Tab::Classwork | Tab::Stream) && !self.classwork.teacher_drafts.contains_key(&course),
                         PageRead::Detail(DetailRead::TeacherDrafts(course))),
-                    (teacher && self.tab == Tab::Grades && !self.gradebooks.contains_key(&course),
+                    (teacher && self.tab == Tab::Grades && !self.grading.gradebooks.contains_key(&course),
                         PageRead::Detail(DetailRead::TeacherGradebook(course))),
-                    (!teacher && matches!(self.tab, Tab::Classwork | Tab::YourWork) && !self.submissions_checked.contains(&course)
+                    (!teacher && matches!(self.tab, Tab::Classwork | Tab::YourWork) && !self.student_work.submissions_checked.contains(&course)
                         && items.is_some_and(|items| items.iter().any(has_submission)), submissions),
-                    (self.tab == Tab::Stream && !self.submissions_checked.contains(&course)
+                    (self.tab == Tab::Stream && !self.student_work.submissions_checked.contains(&course)
                         && !snapshot.upcoming_work(&Local::now(), Some(course), 1).is_empty(), submissions),
-                    (self.tab == Tab::YourWork && !self.overall_grades.contains_key(&course), overall),
+                    (self.tab == Tab::YourWork && !self.student_work.overall_grades.contains_key(&course), overall),
                 ].into_iter().find_map(|(missing, read)| {
                     (missing && !self.page_errors.contains_key(&read)).then_some(read)
                 })?
@@ -198,28 +198,28 @@ impl App {
                 let teacher_work = PageRead::Detail(DetailRead::TeacherSubmissions(course, item_id));
                 if let Some(key) = self.selected_teacher_feedback_key() {
                     let thread = PageRead::Detail(DetailRead::TeacherFeedback(key));
-                    if self.teacher_feedback.get(&key).is_none_or(|data| data.comments.is_none())
+                    if self.grading.teacher_feedback.get(&key).is_none_or(|data| data.comments.is_none())
                         && !self.page_errors.contains_key(&thread)
                     {
                         return Some(thread);
                     }
                 }
                 [
-                    (teacher && has_submission(item) && !self.teacher_work.as_ref()
+                    (teacher && has_submission(item) && !self.grading.teacher_work.as_ref()
                         .is_some_and(|work| work.course == course && work.item == item_id), teacher_work),
                     (snapshot.courses.iter().any(|entry| entry.id == course && entry.state == CourseState::Active)
-                        && !self.stream_access.contains_key(&course) && !self.loading_stream_access.contains(&course), PageRead::StreamAccess(course)),
-                    (item.comments.is_none() || self.comment_unconfirmed.contains(&(course, item_id)), comments),
-                    (!teacher && has_submission(item) && !self.submissions_checked.contains(&course), submissions),
+                        && !self.stream.stream_access.contains_key(&course) && !self.stream.loading_stream_access.contains(&course), PageRead::StreamAccess(course)),
+                    (item.comments.is_none() || self.comments.comment_unconfirmed.contains(&(course, item_id)), comments),
+                    (!teacher && has_submission(item) && !self.student_work.submissions_checked.contains(&course), submissions),
                     (self.personal_copy_candidate(course, item_id).is_some()
-                        && self.personal_copy_checks.get(&(course, item_id)).is_none_or(|(reference, _)|
+                        && self.attachments.personal_copy_checks.get(&(course, item_id)).is_none_or(|(reference, _)|
                             self.personal_copy_candidate(course, item_id).as_ref() != Some(reference)),
                         PageRead::Detail(DetailRead::PersonalCopy(course, item_id))),
-                    (item.kind == CourseworkKind::Assignment && !self.rubrics.contains_key(&(course, item_id)), rubric),
+                    (item.kind == CourseworkKind::Assignment && !self.student_work.rubrics.contains_key(&(course, item_id)), rubric),
                     (!teacher && snapshot.source == SnapshotSource::Live
                         && item.submission.as_ref().is_some_and(|sub| sub.remote_id.is_some())
-                        && (!self.private_feedback.contains_key(&(course, item_id))
-                            || self.private_unconfirmed.contains(&(course, item_id))), feedback),
+                        && (!self.comments.private_feedback.contains_key(&(course, item_id))
+                            || self.comments.private_unconfirmed.contains(&(course, item_id))), feedback),
                 ].into_iter().find_map(|(missing, read)| {
                     (missing && !self.page_errors.contains_key(&read)).then_some(read)
                 })?

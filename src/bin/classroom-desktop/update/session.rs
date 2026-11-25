@@ -1,10 +1,24 @@
 use super::*;
 
+#[derive(Clone)]
+pub(in crate::desktop) enum SessionMessage {
+    Email(String),
+    SignIn,
+    SignedIn(Result<Arc<LiveSession>, String>),
+    Reconnect,
+    Reconnected(Result<(), String>),
+    Refresh,
+    Refreshed(Result<Arc<Snapshot>, String>),
+    Demo,
+    Disconnect,
+    SessionForgotten(Result<(), String>),
+}
+
 impl App {
-    pub(super) fn update_session(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_session(&mut self, message: SessionMessage) -> Task<Message> {
         match message {
-            Message::Email(email) => self.email = email,
-            Message::SignIn if self.can_sign_in() => {
+            SessionMessage::Email(email) => self.email = email,
+            SessionMessage::SignIn if self.can_sign_in() => {
                 self.verification_submitted = self.verify_live_course_count;
                 self.busy = true;
                 self.error = None;
@@ -17,9 +31,9 @@ impl App {
                     } else {
                         desktop_auth::sign_in(email).await
                     }
-                }, |result| Message::SignedIn(result.map(Arc::new)));
+                }, |result| Message::Session(SessionMessage::SignedIn(result.map(Arc::new))));
             }
-            Message::SignedIn(result) => {
+            SessionMessage::SignedIn(result) => {
                 self.busy = false;
                 match result {
                     Ok(session) => {
@@ -27,7 +41,7 @@ impl App {
                             println!("Desktop live QueryCourse OK; class count={}", session.snapshot.courses.len());
                             let _ = io::stdout().flush();
                         }
-                        self.submissions_checked.clear();
+                        self.student_work.submissions_checked.clear();
                         self.page_errors.clear();
                         if std::env::var_os("CLASSROOM_READ_ONLY_DIAGNOSTICS").is_some() {
                             println!("Native session ready; courses={}", session.snapshot.courses.len());
@@ -37,16 +51,16 @@ impl App {
                         self.session = Some(session);
                         self.demo = false;
                         self.screen = Screen::Home;
-                        self.search.clear();
+                        self.home.search.clear();
                         self.reset_assignment_reads();
                         self.reset_artwork();
                         let folders = self.fetch_class_folders();
                         let teachers = self.fetch_class_teachers();
                         let artwork = self.fetch_artwork();
-                        let invitations = self.update(Message::LoadInvitations);
+                        let invitations = self.update(Message::Courses(CoursesMessage::LoadInvitations));
                         return Task::batch([
                             artwork, folders, teachers, invitations, self.fetch_class_creation_permission(),
-                            self.update(Message::LoadAssignments),
+                            self.update(Message::Reads(ReadsMessage::LoadAssignments)),
                         ]);
                     }
                     Err(error) => {
@@ -58,20 +72,20 @@ impl App {
                     }
                 }
             }
-            Message::Reconnect if !self.has_pending_request() => {
+            SessionMessage::Reconnect if !self.has_pending_request() => {
                 if let Some(session) = self.session.clone().filter(|session| session.needs_sign_in()) {
                     self.cancel_assignment_batch();
                     self.busy = true;
                     self.error = None;
-                    return Task::perform(async move { session.reconnect().await }, Message::Reconnected);
+                    return Task::perform(async move { session.reconnect().await }, |value| Message::Session(SessionMessage::Reconnected(value)));
                 }
             }
-            Message::Reconnected(result) => {
+            SessionMessage::Reconnected(result) => {
                 self.busy = false;
                 match result {
                     Ok(()) => {
                         self.reset_personal_copy();
-                        self.submissions_checked.clear();
+                        self.student_work.submissions_checked.clear();
                         self.page_errors.clear();
                         self.reset_notifications();
                         self.reset_stream_access();
@@ -79,7 +93,7 @@ impl App {
                         self.queued_page_load = true;
                         self.invalidate_invitation_read();
                         let background = Task::batch([
-                            self.fetch_class_folders(), self.fetch_class_teachers(), self.update(Message::LoadInvitations),
+                            self.fetch_class_folders(), self.fetch_class_teachers(), self.update(Message::Courses(CoursesMessage::LoadInvitations)),
                             self.fetch_class_creation_permission(),
                         ]);
                         return match self.dequeue_page_load() {
@@ -90,17 +104,17 @@ impl App {
                     Err(error) => self.error = Some(error),
                 }
             }
-            Message::Refresh if !self.verify_live_course_count && !self.has_pending_request() => {
+            SessionMessage::Refresh if !self.verify_live_course_count && !self.has_pending_request() => {
                 if let Some(session) = self.session.clone() {
                     self.refreshing = true;
                     self.error = None;
                     return Task::perform(
                         async move { desktop_auth::refresh(&session).await.map(Arc::new) },
-                        Message::Refreshed,
+                        |value| Message::Session(SessionMessage::Refreshed(value)),
                     );
                 }
             }
-            Message::Refreshed(result) => {
+            SessionMessage::Refreshed(result) => {
                 self.refreshing = false;
                 match result {
                     Ok(snapshot) => {
@@ -119,14 +133,14 @@ impl App {
                             }
                         }
                         self.install_snapshot(snapshot);
-                        self.rubrics.clear();
-                        self.overall_grades.clear();
+                        self.student_work.rubrics.clear();
+                        self.student_work.overall_grades.clear();
                         self.page_errors.retain(|read, _| !matches!(read, PageRead::Detail(DetailRead::Rubric(..))));
                         self.reset_assignment_reads();
                         self.retry_visible_reads_on_entry();
                         self.queued_page_load = true;
                         let background = Task::batch([
-                            self.fetch_artwork(), self.fetch_class_folders(), self.fetch_class_teachers(), self.update(Message::LoadInvitations),
+                            self.fetch_artwork(), self.fetch_class_folders(), self.fetch_class_teachers(), self.update(Message::Courses(CoursesMessage::LoadInvitations)),
                             self.fetch_class_creation_permission(),
                         ]);
                         if self.screen == Screen::Home
@@ -134,7 +148,7 @@ impl App {
                             && self.snapshot.as_ref().is_some_and(|data| data.courses.iter().any(|row| row.id == course))
                         {
                             self.opening_joined_course = None;
-                            return Task::batch([background, self.update(Message::Navigate(Screen::Course(course)))]);
+                            return Task::batch([background, self.update(Message::Navigation(NavigationMessage::Navigate(Screen::Course(course))))]);
                         }
                         return match self.dequeue_page_load() {
                             Some(request) => Task::batch([background, self.update(request)]),
@@ -144,32 +158,32 @@ impl App {
                     Err(error) => self.error = Some(error),
                 }
             }
-            Message::Demo if !self.has_pending_request() => {
+            SessionMessage::Demo if !self.has_pending_request() => {
                 self.install_snapshot(Snapshot::demo());
                 self.reset_artwork();
                 self.session = None;
-                self.opening_drive_file = None;
+                self.attachments.opening_drive_file = None;
                 self.class_creation_generation = self.class_creation_generation.wrapping_add(1);
                 self.class_creation_allowed = false;
                 self.new_class = desktop_auth::NewClass::default();
                 self.demo = true;
                 self.screen = Screen::Home;
-                self.search.clear();
+                self.home.search.clear();
                 self.error = None;
             }
-            Message::Disconnect if !self.has_pending_request() && self.session.is_some() => {
+            SessionMessage::Disconnect if !self.has_pending_request() && self.session.is_some() => {
                 self.discard_submission_capture();
                 self.cancel_assignment_batch();
                 let account = self.session.as_ref().unwrap().account.clone();
                 self.busy = true;
-                return Task::perform(desktop_auth::forget_session(account), Message::SessionForgotten);
+                return Task::perform(desktop_auth::forget_session(account), |value| Message::Session(SessionMessage::SessionForgotten(value)));
             }
-            Message::SessionForgotten(Err(error)) => {
+            SessionMessage::SessionForgotten(Err(error)) => {
                 self.busy = false;
                 self.queued_page_load = true;
                 self.error = Some(error);
             }
-            Message::SessionForgotten(Ok(())) | Message::Disconnect => {
+            SessionMessage::SessionForgotten(Ok(())) | SessionMessage::Disconnect => {
                 self.busy = false;
                 self.reset_artwork();
                 self.session = None;
@@ -177,23 +191,23 @@ impl App {
                 self.reset_personal_copy();
                 self.classroom_link_input = None;
                 self.invalidate_classroom_link_check();
-                self.show_hidden_classes = false;
-                self.open_course_menu = None;
-                self.move_course_menu = None;
-                self.course_drag = None;
-                self.confirm_hide_course = None;
-                self.confirm_class_archive = None;
+                self.home.show_hidden_classes = false;
+                self.home.open_course_menu = None;
+                self.home.move_course_menu = None;
+                self.home.course_drag = None;
+                self.home.confirm_hide_course = None;
+                self.home.confirm_class_archive = None;
                 self.reset_class_folders();
                 self.teachers_generation = self.teachers_generation.wrapping_add(1);
                 self.class_teachers.clear();
                 self.reset_notifications();
                 self.reset_stream_access();
-                self.confirming_stream_delete = None;
-                self.open_stream_composer = None;
-                self.stream_drafts.clear();
-                self.drive_picker = None;
+                self.stream.confirming_stream_delete = None;
+                self.stream.open_stream_composer = None;
+                self.stream.stream_drafts.clear();
+                self.attachments.drive_picker = None;
                 self.reset_assignment_reads();
-                self.submissions_checked.clear();
+                self.student_work.submissions_checked.clear();
                 self.page_errors.clear();
                 self.class_code.clear();
                 self.invalidate_invitation_read();
@@ -201,31 +215,31 @@ impl App {
                 self.opening_joined_course = None;
                 self.confirming_decline = None;
                 self.confirming_unenroll = None;
-                self.comment_drafts.clear();
+                self.comments.comment_drafts.clear();
                 self.invalidate_people_email();
-                self.comment_mentions_generation = self.comment_mentions_generation.wrapping_add(1);
-                self.comment_mentions = None;
-                self.short_answer_drafts.clear();
-                self.short_answer_revisions.clear();
-                self.choice_drafts.clear();
-                self.confirming_question_answer = None;
-                self.comment_unconfirmed.clear();
-                self.private_feedback.clear();
-                self.rubrics.clear();
-                self.overall_grades.clear();
-                self.rubric_open = false;
-                self.open_criteria.clear();
-                self.private_drafts.clear();
-                self.confirming_comment_delete = None;
-                self.private_unconfirmed.clear();
-                self.pending_remove_material = None;
-                self.pending_submission = None;
+                self.comments.comment_mentions_generation = self.comments.comment_mentions_generation.wrapping_add(1);
+                self.comments.comment_mentions = None;
+                self.student_work.short_answer_drafts.clear();
+                self.student_work.short_answer_revisions.clear();
+                self.student_work.choice_drafts.clear();
+                self.student_work.confirming_question_answer = None;
+                self.comments.comment_unconfirmed.clear();
+                self.comments.private_feedback.clear();
+                self.student_work.rubrics.clear();
+                self.student_work.overall_grades.clear();
+                self.student_work.rubric_open = false;
+                self.student_work.open_criteria.clear();
+                self.comments.private_drafts.clear();
+                self.comments.confirming_comment_delete = None;
+                self.comments.private_unconfirmed.clear();
+                self.attachments.pending_remove_material = None;
+                self.student_work.pending_submission = None;
                 self.item_id = None;
-                self.attachment_link.clear();
-                self.submission_file = None;
+                self.attachments.attachment_link.clear();
+                self.attachments.submission_file = None;
                 self.demo = false;
                 self.screen = Screen::Home;
-                self.search.clear();
+                self.home.search.clear();
                 self.email.clear();
                 self.error = None;
                 self.notice = None;

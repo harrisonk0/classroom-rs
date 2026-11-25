@@ -23,7 +23,10 @@ mod stream;
 mod stream_draft;
 mod student_work;
 mod ui;
+mod appearance;
+use appearance::{appearance_color, classroom_palette, themed_text};
 mod update;
+use update::{NavigationMessage, TeachingMessage, CoursesMessage, SessionMessage, ReadsMessage, StreamMessage, AttachmentsMessage, CommentsMessage, SubmissionsMessage, NotificationsMessage, DeadlinesMessage, ScreenshotsMessage};
 
 use attachments::{
     choose_attachment_file, DriveNavigation, DrivePicker, DriveSection, eligible_personal_copy_template,
@@ -132,12 +135,7 @@ pub(super) fn run() -> iced::Result {
         move || App::boot(screenshot_directory.clone(), verify_live_course_count), App::update, App::view,
     )
         .title("Classroom for Mac")
-        .theme(Theme::custom("Classroom", iced::theme::Palette {
-            background: WHITE,
-            text: FG,
-            primary: BLUE,
-            ..iced::theme::Palette::LIGHT
-        }))
+        .theme(App::theme)
         .font(include_bytes!("../../../assets/fonts/GoogleSansFlex.ttf").as_slice())
         .default_font(CLASSROOM_FONT)
         .subscription(App::subscription)
@@ -227,13 +225,13 @@ enum PageRead {
 impl PageRead {
     fn message(self) -> Message {
         match self {
-            Self::Coursework(id) => Message::LoadCoursework(id),
-            Self::Assignments => Message::LoadAssignments,
-            Self::Detail(read) => Message::LoadDetail(read),
-            Self::Invitations => Message::LoadInvitations,
-            Self::ClassNotifications => Message::LoadClassNotifications,
-            Self::EmailNotifications => Message::LoadEmailNotifications,
-            Self::StreamAccess(id) => Message::LoadStreamAccess(id),
+            Self::Coursework(id) => Message::Reads(ReadsMessage::LoadCoursework(id)),
+            Self::Assignments => Message::Reads(ReadsMessage::LoadAssignments),
+            Self::Detail(read) => Message::Reads(ReadsMessage::LoadDetail(read)),
+            Self::Invitations => Message::Courses(CoursesMessage::LoadInvitations),
+            Self::ClassNotifications => Message::Notifications(NotificationsMessage::LoadClassNotifications),
+            Self::EmailNotifications => Message::Notifications(NotificationsMessage::LoadEmailNotifications),
+            Self::StreamAccess(id) => Message::Reads(ReadsMessage::LoadStreamAccess(id)),
         }
     }
 }
@@ -341,151 +339,55 @@ impl AssignmentBatch {
 }
 
 struct App {
+    dark_fixture: bool,
+    people: people::PeopleState,
+    grading: grading::GradingState,
+    student_work: student_work::StudentWorkState,
+    classwork: classwork::ClassworkState,
+    comments: comments::CommentsState,
+    attachments: attachments::AttachmentsState,
+    settings: settings::SettingsState,
+    stream: stream::StreamState,
+    home: home::HomeState,
+    deadlines: deadlines::DeadlinesState,
     offline_pending: bool,
-    now: DateTime<Local>,
     screen: Screen,
     classroom_link_input: Option<String>,
     classroom_link_generation: u64,
     checking_classroom_link: bool,
     tab: Tab,
     sidebar: bool,
-    search: String,
-    alphabetical: bool,
-    show_hidden_classes: bool,
-    open_course_menu: Option<i64>,
-    move_course_menu: Option<i64>,
-    moving_course: Option<i64>,
-    course_drag: Option<CourseDrag>,
-    confirm_hide_course: Option<i64>,
-    confirm_class_archive: Option<i64>,
-    changing_class_archive: Option<(i64, bool)>,
-    changing_course_visibility: Option<(i64, bool)>,
     email: String,
     demo: bool,
     busy: bool,
     refreshing: bool,
     loading_coursework: Option<i64>,
-    loading_stream_access: BTreeSet<i64>,
-    stream_access: BTreeMap<i64, StreamAccess>,
-    stream_viewer_id: Option<i64>,
-    stream_access_generation: u64,
-    stream_drafts: BTreeMap<i64, StreamDraft>,
-    open_stream_composer: Option<i64>,
-    sending_stream_post: Option<i64>,
-    choosing_stream_file: Option<i64>,
-    uploading_stream_file: Option<i64>,
-    drive_picker: Option<DrivePicker>,
-    drive_picker_generation: u64,
-    confirming_stream_delete: Option<(i64, i64)>,
-    deleting_stream_post: Option<(i64, i64)>,
     assignment_batch: Option<AssignmentBatch>,
     assignment_generation: u64,
     assignments_completed: BTreeSet<i64>,
     assignments_loaded: bool,
     queued_page_load: bool,
     loading_detail: Option<DetailRead>,
-    rubrics: BTreeMap<(i64, i64), Option<Rubric>>,
-    overall_grades: BTreeMap<i64, Option<CourseGrade>>,
-    rubric_open: bool,
-    open_criteria: BTreeSet<usize>,
     page_errors: BTreeMap<PageRead, String>,
-    comment_drafts: BTreeMap<(i64, i64), text_editor::Content>,
-    empty_comment_draft: text_editor::Content,
-    people_email_generation: u64,
-    people_email_pending: Option<(i64, i64)>,
-    comment_mentions_generation: u64,
-    comment_mentions: Option<CommentMentions>,
-    comment_unconfirmed: BTreeSet<(i64, i64)>,
-    posting_comment: bool,
     class_code: String,
     class_creation_generation: u64,
     class_creation_allowed: bool,
-    opening_drive_file: Option<String>,
-    preparing_drive_preview: bool,
-    saving_drive_file: bool,
     new_class: desktop_auth::NewClass,
     invitations: Option<Vec<Course>>,
     loading_invitations: bool,
     invitation_generation: u64,
-    class_notifications: Option<BTreeMap<i64, bool>>,
-    loading_class_notifications: bool,
-    notifications_generation: u64,
-    saving_class_notifications: Option<i64>,
-    email_notifications: Option<EmailNotificationSettings>,
-    loading_email_notifications: bool,
-    saving_email_notification: Option<EmailNotificationTarget>,
     opening_joined_course: Option<i64>,
     confirming_decline: Option<i64>,
     confirming_unenroll: Option<i64>,
     changing_membership: bool,
-    pending_submission: Option<(i64, i64, desktop_auth::SubmissionAction)>,
-    new_submission_document_open: bool,
-    short_answer_drafts: BTreeMap<(i64, i64), text_editor::Content>,
-    short_answer_revisions: BTreeMap<(i64, i64), desktop_auth::ShortAnswerRevision>,
-    empty_short_answer: text_editor::Content,
-    choice_drafts: BTreeMap<(i64, i64), String>,
-    confirming_question_answer: Option<(i64, i64)>,
-    sending_submission: bool,
-    attachment_link: String,
-    submission_file: Option<(i64, i64, PathBuf)>,
-    #[cfg(target_os = "macos")]
-    submission_capture: Option<CaptureState>,
-    #[cfg(target_os = "macos")]
-    capture_generation: u64,
-    choosing_submission_file: bool,
-    private_feedback: BTreeMap<(i64, i64), Vec<Comment>>,
-    private_drafts: BTreeMap<(i64, i64), text_editor::Content>,
-    confirming_comment_delete: Option<CommentTarget>,
-    deleting_comment: Option<CommentTarget>,
-    private_unconfirmed: BTreeSet<(i64, i64)>,
-    pending_remove_material: Option<(i64, i64, i64)>,
-    personal_copy_checks: BTreeMap<(i64, i64), (String, bool)>,
-    pending_personal_copy: Option<(i64, i64, String)>,
-    personal_copy_generation: u64,
-    personal_copy_loading_generation: Option<u64>,
-    submissions_checked: BTreeSet<i64>,
-    selected_topic: Option<String>,
-    classwork_toggles: BTreeSet<String>,
-    collapsed_classwork_groups: BTreeSet<ClassworkGroupId>,
-    todo_filter: TodoFilter,
-    work_filter: WorkFilter,
-    todo_class: Option<i64>,
-    collapsed_todo_groups: BTreeSet<(TodoFilter, TodoGroup)>,
-    calendar_monday: NaiveDate,
-    calendar_class: Option<i64>,
     item_id: Option<String>,
     previous_screen: Option<Screen>,
     artwork: BTreeMap<String, image::Handle>,
     artwork_generation: u64,
-    stream_profiles_requested: BTreeSet<i64>,
-    stream_profiles: BTreeMap<i64, desktop_auth::UserProfile>,
-    stream_profile_pictures: BTreeMap<String, image::Handle>,
     class_folders: BTreeMap<i64, String>,
     class_roles: BTreeMap<i64, CourseRole>,
-    teacher_drafts: BTreeMap<i64, Vec<desktop_auth::TeacherDraft>>,
-    open_teacher_draft: Option<(i64, String)>,
-    assignment_editor: Option<AssignmentEditor>,
-    assignment_publication: Option<AssignmentPublicationPrompt>,
-    teacher_work: Option<TeacherWork>,
-    teacher_feedback: BTreeMap<desktop_auth::TeacherFeedbackKey, TeacherFeedbackThread>,
-    gradebooks: BTreeMap<i64, desktop_auth::TeacherGradebook>,
-    gradebook_page: usize,
-    gradebook_student: Option<(i64, i64, i64)>,
     class_stream_settings: Option<ClassStreamSettingsEditor>,
-    student_muting: BTreeMap<i64, BTreeMap<i64, bool>>,
-    pending_student_mute: Option<(i64, i64, bool)>,
-    changing_student_mute: bool,
-    teacher_topics: BTreeMap<i64, Vec<desktop_data::Topic>>,
-    topic_manager: bool,
-    topic_editor: Option<(i64, desktop_auth::TeacherTopicAction)>,
-    item_topic_editor: Option<ItemTopicEditor>,
-    saving_topic: bool,
     saving_stream_settings: bool,
-    gradebook_edit_mode: bool,
-    gradebook_edit: Option<GradebookEdit>,
-    exporting_grades: bool,
-    saving_teacher_grade: bool,
-    saving_assignment_draft: bool,
     class_folders_generation: u64,
     class_teachers: BTreeMap<i64, String>,
     teachers_generation: u64,
@@ -503,125 +405,51 @@ impl App {
     fn boot(screenshot_directory: Option<PathBuf>, verify_live_course_count: bool) -> (Self, Task<Message>) {
         let synthetic = screenshot_directory.is_some();
         let mut app = Self {
+            dark_fixture: synthetic && std::env::var_os("CLASSROOM_DARK_FIXTURE").is_some(),
+            people: people::PeopleState::default(),
+            grading: grading::GradingState::default(),
+            student_work: student_work::StudentWorkState::new(),
+            classwork: classwork::ClassworkState::default(),
+            comments: comments::CommentsState::new(),
+            attachments: attachments::AttachmentsState::default(),
+            settings: settings::SettingsState::default(),
+            stream: stream::StreamState::default(),
+            home: home::HomeState::default(),
+            deadlines: deadlines::DeadlinesState::new(),
             offline_pending: false,
-            now: Local::now(),
             screen: Screen::Home,
             classroom_link_input: None,
             classroom_link_generation: 0,
             checking_classroom_link: false,
             tab: Tab::Stream,
             sidebar: true,
-            search: String::new(),
-            alphabetical: false,
-            show_hidden_classes: false,
-            open_course_menu: None,
-            move_course_menu: None,
-            moving_course: None,
-            course_drag: None,
-            confirm_hide_course: None,
-            confirm_class_archive: None,
-            changing_class_archive: None,
-            changing_course_visibility: None,
             email: String::new(),
             demo: synthetic,
             busy: false,
             refreshing: false,
             loading_coursework: None,
-            loading_stream_access: BTreeSet::new(),
-            stream_access: BTreeMap::new(),
-            stream_viewer_id: None,
-            stream_access_generation: 0,
-            stream_drafts: BTreeMap::new(),
-            open_stream_composer: None,
-            sending_stream_post: None,
-            choosing_stream_file: None,
-            uploading_stream_file: None,
-            drive_picker: None,
-            drive_picker_generation: 0,
-            confirming_stream_delete: None,
-            deleting_stream_post: None,
             assignment_batch: None,
             assignment_generation: 0,
             assignments_completed: BTreeSet::new(),
             assignments_loaded: false,
             queued_page_load: false,
             loading_detail: None,
-            rubrics: BTreeMap::new(),
-            overall_grades: BTreeMap::new(),
-            rubric_open: false,
-            open_criteria: BTreeSet::new(),
             page_errors: BTreeMap::new(),
-            comment_drafts: BTreeMap::new(),
-            empty_comment_draft: text_editor::Content::new(),
-            people_email_generation: 0,
-            people_email_pending: None,
-            comment_mentions_generation: 0,
-            comment_mentions: None,
-            comment_unconfirmed: BTreeSet::new(),
-            posting_comment: false,
             class_code: String::new(),
             class_creation_generation: 0,
             class_creation_allowed: false,
-            opening_drive_file: None,
-            preparing_drive_preview: false,
-            saving_drive_file: false,
             new_class: desktop_auth::NewClass::default(),
             invitations: None,
             loading_invitations: false,
             invitation_generation: 0,
-            class_notifications: None,
-            loading_class_notifications: false,
-            notifications_generation: 0,
-            saving_class_notifications: None,
-            email_notifications: None,
-            loading_email_notifications: false,
-            saving_email_notification: None,
             opening_joined_course: None,
             confirming_decline: None,
             confirming_unenroll: None,
             changing_membership: false,
-            pending_submission: None,
-            new_submission_document_open: false,
-            short_answer_drafts: BTreeMap::new(),
-            short_answer_revisions: BTreeMap::new(),
-            empty_short_answer: text_editor::Content::new(),
-            choice_drafts: BTreeMap::new(),
-            confirming_question_answer: None,
-            sending_submission: false,
-            attachment_link: String::new(),
-            submission_file: None,
-            #[cfg(target_os = "macos")]
-            submission_capture: None,
-            #[cfg(target_os = "macos")]
-            capture_generation: 0,
-            choosing_submission_file: false,
-            private_feedback: BTreeMap::new(),
-            private_drafts: BTreeMap::new(),
-            confirming_comment_delete: None,
-            deleting_comment: None,
-            private_unconfirmed: BTreeSet::new(),
-            pending_remove_material: None,
-            personal_copy_checks: BTreeMap::new(),
-            pending_personal_copy: None,
-            personal_copy_generation: 0,
-            personal_copy_loading_generation: None,
-            submissions_checked: BTreeSet::new(),
-            selected_topic: None,
-            classwork_toggles: BTreeSet::new(),
-            collapsed_classwork_groups: BTreeSet::new(),
-            todo_filter: TodoFilter::default(),
-            work_filter: WorkFilter::default(),
-            todo_class: None,
-            collapsed_todo_groups: BTreeSet::new(),
-            calendar_monday: monday_of(Local::now().date_naive()),
-            calendar_class: None,
             item_id: None,
             previous_screen: None,
             artwork: BTreeMap::new(),
             artwork_generation: 0,
-            stream_profiles_requested: BTreeSet::new(),
-            stream_profiles: BTreeMap::new(),
-            stream_profile_pictures: BTreeMap::new(),
             class_folders: if synthetic {
                 BTreeMap::from([(1, "https://drive.google.com/drive/folders/demo".into())])
             } else {
@@ -629,30 +457,8 @@ impl App {
             },
             class_folders_generation: 0,
             class_roles: BTreeMap::new(),
-            teacher_drafts: BTreeMap::new(),
-            open_teacher_draft: None,
-            assignment_editor: None,
-            assignment_publication: None,
-            teacher_work: None,
-            teacher_feedback: BTreeMap::new(),
-            gradebooks: BTreeMap::new(),
-            gradebook_page: 0,
-            gradebook_student: None,
             class_stream_settings: None,
-            student_muting: BTreeMap::new(),
-            pending_student_mute: None,
-            changing_student_mute: false,
-            teacher_topics: BTreeMap::new(),
-            topic_manager: false,
-            topic_editor: None,
-            item_topic_editor: None,
-            saving_topic: false,
             saving_stream_settings: false,
-            gradebook_edit_mode: false,
-            gradebook_edit: None,
-            exporting_grades: false,
-            saving_teacher_grade: false,
-            saving_assignment_draft: false,
             class_teachers: if synthetic {
                 BTreeMap::from([(1, "Morgan Lane".into()), (2, "Alex Smith".into()), (3, "Jamie Clarke".into())])
             } else { BTreeMap::new() },
@@ -686,7 +492,7 @@ impl App {
             if let Some(account) = desktop_auth::remembered_account() {
                 app.email = account.clone();
                 app.busy = true;
-                Task::perform(desktop_auth::restore_session(account), |result| Message::SignedIn(result.map(Arc::new)))
+                Task::perform(desktop_auth::restore_session(account), |result| Message::Session(SessionMessage::SignedIn(result.map(Arc::new))))
             } else {
                 Task::none()
             }
@@ -698,62 +504,62 @@ impl App {
 
     fn has_pending_request(&self) -> bool {
         #[cfg(target_os = "macos")]
-        if matches!(self.submission_capture, Some(CaptureState::AskingPermission | CaptureState::Recording(..)
+        if matches!(self.attachments.submission_capture, Some(CaptureState::AskingPermission | CaptureState::Recording(..)
             | CaptureState::AskingCamera | CaptureState::RecordingCamera { .. } | CaptureState::RecordingScreen { .. })) {
             return true;
         }
-        self.busy || self.offline_pending || self.refreshing || self.changing_membership || self.posting_comment || self.choosing_submission_file
-            || self.saving_drive_file || self.preparing_drive_preview
-            || self.saving_assignment_draft
-            || self.saving_teacher_grade
+        self.busy || self.offline_pending || self.refreshing || self.changing_membership || self.comments.posting_comment || self.attachments.choosing_submission_file
+            || self.attachments.saving_drive_file || self.attachments.preparing_drive_preview
+            || self.classwork.saving_assignment_draft
+            || self.grading.saving_teacher_grade
             || self.saving_stream_settings
-            || self.changing_student_mute
-            || self.saving_topic
-            || self.exporting_grades
-            || self.sending_submission || self.loading_coursework.is_some() || self.loading_detail.is_some()
-            || self.saving_class_notifications.is_some() || self.saving_email_notification.is_some()
-            || self.sending_stream_post.is_some() || self.deleting_stream_post.is_some()
-            || self.changing_course_visibility.is_some() || self.moving_course.is_some()
-            || self.changing_class_archive.is_some()
-            || self.choosing_stream_file.is_some() || self.uploading_stream_file.is_some()
-            || self.deleting_comment.is_some()
+            || self.people.changing_student_mute
+            || self.classwork.saving_topic
+            || self.grading.exporting_grades
+            || self.student_work.sending_submission || self.loading_coursework.is_some() || self.loading_detail.is_some()
+            || self.settings.saving_class_notifications.is_some() || self.settings.saving_email_notification.is_some()
+            || self.stream.sending_stream_post.is_some() || self.stream.deleting_stream_post.is_some()
+            || self.home.changing_course_visibility.is_some() || self.home.moving_course.is_some()
+            || self.home.changing_class_archive.is_some()
+            || self.stream.choosing_stream_file.is_some() || self.stream.uploading_stream_file.is_some()
+            || self.comments.deleting_comment.is_some()
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let drag = if self.course_drag.is_some() {
+        let drag = if self.home.course_drag.is_some() {
             iced::event::listen_with(|event, _, _| match event {
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::DropCourse),
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::Courses(CoursesMessage::DropCourse)),
             Event::Window(window::Event::Unfocused) | Event::Mouse(mouse::Event::CursorLeft) =>
-                Some(Message::CancelCourseDrag),
+                Some(Message::Courses(CoursesMessage::CancelCourseDrag)),
             _ => None,
             })
         } else {
             Subscription::none()
         };
-        let edit_keys = if self.gradebook_edit.is_some() {
+        let edit_keys = if self.grading.gradebook_edit.is_some() {
             iced::event::listen_with(|event, _, _| match event {
                 Event::Keyboard(iced::keyboard::Event::KeyPressed {
                     key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape), ..
-                }) => Some(Message::CancelGradebookEdit),
+                }) => Some(Message::Teaching(TeachingMessage::CancelGradebookEdit)),
                 _ => None,
             })
         } else {
             Subscription::none()
         };
         let file_drop = iced::event::listen_with(|event, _, _| match event {
-            Event::Window(window::Event::FileDropped(path)) => Some(Message::SubmissionFileDropped(path)),
+            Event::Window(window::Event::FileDropped(path)) => Some(Message::Submissions(SubmissionsMessage::SubmissionFileDropped(path))),
             _ => None,
         });
         let clock = if self.screenshot_directory.is_none() {
-            iced::time::every(Duration::from_secs(30)).map(|_| Message::ClockTick(Local::now()))
+            iced::time::every(Duration::from_secs(30)).map(|_| Message::Deadlines(DeadlinesMessage::ClockTick(Local::now())))
         } else {
             Subscription::none()
         };
         let subscriptions = Subscription::batch([drag, edit_keys, file_drop, clock]);
         #[cfg(target_os = "macos")]
-        if matches!(self.submission_capture, Some(CaptureState::RecordingCamera { .. })) {
+        if matches!(self.attachments.submission_capture, Some(CaptureState::RecordingCamera { .. })) {
             let frames = iced::time::every(Duration::from_millis(100))
-                .map(|_| Message::Capture(CaptureAction::CameraFrame));
+                .map(|_| Message::Navigation(NavigationMessage::Capture(CaptureAction::CameraFrame)));
             return Subscription::batch([subscriptions, frames]);
         }
         subscriptions
@@ -782,7 +588,7 @@ impl App {
             || shared_question_read_is_current(
                 self.can_read_pages(),
                 self.class_roles.get(&course).copied(),
-                self.submissions_checked.contains(&course),
+                self.student_work.submissions_checked.contains(&course),
                 self.page_errors.contains_key(&PageRead::Detail(DetailRead::Submissions(course))),
                 self.loading_detail == Some(DetailRead::Submissions(course)),
             )
@@ -801,7 +607,7 @@ impl App {
         }
         if let Some(error) = self.page_errors.get(&read) {
             return Some(row![
-                text(error).size(14).color(color!(0x9b2722)).width(Fill),
+                text(error).size(14).style(|theme| themed_text(theme, color!(0x9b2722))).width(Fill),
                 button("Retry").padding([8, 12]).style(outline_style)
                     .on_press_maybe((!self.has_pending_request()).then_some(read.message())),
             ].spacing(12).align_y(Alignment::Center).into());
@@ -811,18 +617,18 @@ impl App {
             PageRead::Assignments => self.assignment_batch.is_some(),
             PageRead::Detail(detail) => self.loading_detail == Some(detail),
             PageRead::Invitations => self.loading_invitations,
-            PageRead::ClassNotifications => self.loading_class_notifications,
-            PageRead::EmailNotifications => self.loading_email_notifications,
-            PageRead::StreamAccess(course) => self.loading_stream_access.contains(&course),
+            PageRead::ClassNotifications => self.settings.loading_class_notifications,
+            PageRead::EmailNotifications => self.settings.loading_email_notifications,
+            PageRead::StreamAccess(course) => self.stream.loading_stream_access.contains(&course),
         };
-        (loading || !available).then(|| text(pending).size(14).color(MUTED).into())
+        (loading || !available).then(|| text(pending).size(14).style(|theme| themed_text(theme, MUTED)).into())
     }
 
     fn unavailable_screen(
         &self, title: &'static str, glyph: Icon, body: &'static str,
     ) -> Element<'_, Message> {
         scrollable(column![
-            text(title).size(27).color(FG),
+            text(title).size(27).style(|theme| themed_text(theme, FG)),
             empty_panel(glyph, "No live data available", body),
         ].spacing(22).padding(26).width(Fill)).width(Fill).height(Fill).into()
     }
