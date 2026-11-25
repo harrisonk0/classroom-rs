@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn existing_file_is_added_to_one_submission_without_an_upload_marker() {
-        use crate::desktop_auth::{attach_material_request, mutation};
+        use crate::desktop_auth::{mutation, submission_attachments::attach_material_request};
         use prost::Message;
         let file = DriveFileAttachment::existing("fixture-file".into(), "Notes".into(), "application/pdf".into()).unwrap();
         let key = classwork::SubmissionId {

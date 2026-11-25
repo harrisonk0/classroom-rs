@@ -38,6 +38,8 @@ Live verification has focused on read-only Google Workspace workflows. Account c
 
 ## Project notes
 
+- [Desktop application](src/bin/classroom-desktop/) contains the native screens, shared controls, and application state. The [update modules](src/bin/classroom-desktop/update/) handle user actions and background results by feature. The [desktop tests](src/bin/classroom-desktop/tests.rs) exercise navigation and workflows.
+- [Backend modules](src/desktop_auth/) handle Classroom and Drive requests. [Protocol definitions](proto/) describe the messages they exchange. [macOS packaging](desktop/) contains the bundle script and its runtime helpers.
 - [Release tags](https://github.com/harrisonk0/classroom-rs/tags)
 - [Recovered protocol evidence](analysis/feature-parity.md)
 - [Earlier protocol and OAuth experiments](analysis/protocol-notes.md)
